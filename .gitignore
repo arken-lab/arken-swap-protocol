@@ -1,0 +1,14 @@
+node_modules
+.vscode
+yarn-error.log
+
+#Hardhat files
+cache
+artifacts
+coverage
+coverage.json
+typechain
+
+secrets.json
+.env
+.openzeppelin
