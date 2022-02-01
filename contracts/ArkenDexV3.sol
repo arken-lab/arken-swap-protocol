@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: UNLICENSED
 
-pragma solidity ^0.8.0;
+pragma solidity =0.8.11;
 pragma experimental ABIEncoderV2;
 
 import '@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol';
@@ -18,8 +18,8 @@ import './interfaces/IDoppleSwap.sol';
 import './interfaces/IDODOV2Proxy.sol';
 import './interfaces/IBalancer.sol';
 import './interfaces/IArkenApprove.sol';
-import './lib/OwnableUpgradeable.sol';
 import './lib/UniswapV2Library.sol';
+import './lib/UniswapV3CallbackValidation.sol';
 
 // import 'hardhat/console.sol';
 
@@ -41,6 +41,7 @@ contract ArkenDexV3 is Ownable {
     address public _WETH_;
     address public _WETH_DFYN_;
     address public _ARKEN_APPROVE_;
+    address public _UNISWAP_V3_FACTORY_;
 
     /*
     ==============================================================================
@@ -61,7 +62,7 @@ contract ArkenDexV3 is Ownable {
     event WETHDfynUpdated(address newWETHDfyn);
     event DODOApproveUpdated(address newDODOApproveAddress);
     event ArkenApproveUpdated(address newArkenApproveAddress);
-    event FeeRateUpdated(uint256 feeRate);
+    event UniswapV3FactoryUpdated(address newUv3Factory);
 
     /*
     ==============================================================================
@@ -77,7 +78,8 @@ contract ArkenDexV3 is Ownable {
         address _wrappedEther,
         address _wrappedEtherDfyn,
         address _dodoApproveAddress,
-        address _arkenApprove
+        address _arkenApprove,
+        address _uniswapV3Factory
     ) {
         transferOwnership(_ownerAddress);
         _FEE_WALLET_ADDR_ = _feeWalletAddress;
@@ -85,6 +87,7 @@ contract ArkenDexV3 is Ownable {
         _WETH_ = _wrappedEther;
         _WETH_DFYN_ = _wrappedEtherDfyn;
         _ARKEN_APPROVE_ = _arkenApprove;
+        _UNISWAP_V3_FACTORY_ = _uniswapV3Factory;
     }
 
     receive() external payable {}
@@ -122,6 +125,12 @@ contract ArkenDexV3 is Ownable {
         require(_arkenApprove != address(0), 'arken approve zero address');
         _ARKEN_APPROVE_ = _arkenApprove;
         emit ArkenApproveUpdated(_ARKEN_APPROVE_);
+    }
+
+    function updateUniswapV3Factory(address _uv3Factory) external onlyOwner {
+        require(_uv3Factory != address(0), 'UniswapV3 Factory zero address');
+        _UNISWAP_V3_FACTORY_ = _uv3Factory;
+        emit UniswapV3FactoryUpdated(_UNISWAP_V3_FACTORY_);
     }
 
     /*
@@ -175,6 +184,7 @@ contract ArkenDexV3 is Ownable {
     struct UniswapV3CallbackData {
         address token0;
         address token1;
+        uint24 fee;
     }
 
     function trade(TradeDescription memory desc) external payable {
@@ -259,7 +269,7 @@ contract ArkenDexV3 is Ownable {
         }
         if (!desc.isSourceFee) {
             require(
-                returnAmount >= desc.amountOutMin,
+                returnAmount >= desc.amountOutMin && returnAmount > 0,
                 'Return amount is not enough'
             );
             returnAmount = _collectFee(returnAmount, desc.dstToken);
@@ -290,6 +300,12 @@ contract ArkenDexV3 is Ownable {
             require(
                 route.fromToken == desc.srcToken,
                 'Cannot transfer token from msg.sender'
+            );
+        }
+        if (route.to == address(1)) {
+            require(
+                desc.isSourceFee,
+                'Cannot transfer directly to address when collect fee at destination'
             );
         }
         uint256 amountIn;
@@ -446,7 +462,8 @@ contract ArkenDexV3 is Ownable {
             abi.encode(
                 UniswapV3CallbackData({
                     token0: pool.token0(),
-                    token1: pool.token1()
+                    token1: pool.token1(),
+                    fee: pool.fee()
                 })
             )
         );
@@ -562,6 +579,16 @@ contract ArkenDexV3 is Ownable {
         UniswapV3CallbackData memory data = abi.decode(
             _data,
             (UniswapV3CallbackData)
+        );
+        IUniswapV3Pool pool = UniswapV3CallbackValidation.verifyCallback(
+            _UNISWAP_V3_FACTORY_,
+            data.token0,
+            data.token1,
+            data.fee
+        );
+        require(
+            address(pool) == msg.sender,
+            'UV3Callback: msg.sender is not UniswapV3 Pool'
         );
         if (amount0Delta > 0) {
             IERC20(data.token0).safeTransfer(msg.sender, uint256(amount0Delta));

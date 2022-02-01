@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: UNLICENSED
 
-pragma solidity ^0.8.0;
+pragma solidity =0.8.11;
 
 import '@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol';
 import '@openzeppelin/contracts/proxy/utils/Initializable.sol';
@@ -37,7 +37,7 @@ contract ArkenApprove is Initializable, OwnableUpgradeable {
     constructor() initializer {}
 
     function initialize(address _ownerAddress, address _callableAddress)
-        public
+        external
         initializer
     {
         ownableUpgradeableInitialize();
@@ -58,7 +58,7 @@ contract ArkenApprove is Initializable, OwnableUpgradeable {
         external
         onlyOwner
     {
-        emit SetCallableAddress(address(0), _callableAddress);
+        emit SetCallableAddress(_CALLABLE_ADDRESS_, _callableAddress);
         _CALLABLE_ADDRESS_ = _callableAddress;
     }
 
