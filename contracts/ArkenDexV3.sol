@@ -302,10 +302,14 @@ contract ArkenDexV3 is Ownable {
                 'Cannot transfer token from msg.sender'
             );
         }
-        if (route.to == address(1)) {
+        if (
+            !desc.isSourceFee &&
+            (route.toToken == desc.dstToken ||
+                (_ETH_ == desc.dstToken && _WETH_ == route.toToken))
+        ) {
             require(
-                desc.isSourceFee,
-                'Cannot transfer directly to address when collect fee at destination'
+                route.to == address(0),
+                'Destination swap have to be ArkenDex'
             );
         }
         uint256 amountIn;
