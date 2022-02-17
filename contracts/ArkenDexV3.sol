@@ -4,7 +4,6 @@ pragma solidity =0.8.11;
 pragma experimental ABIEncoderV2;
 
 import '@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol';
-import '@openzeppelin/contracts/utils/math/SafeMath.sol';
 import '@openzeppelin/contracts/access/Ownable.sol';
 import '@uniswap/v2-core/contracts/interfaces/IUniswapV2Pair.sol';
 import '@uniswap/v2-periphery/contracts/interfaces/IUniswapV2Router01.sol';
@@ -25,7 +24,6 @@ import './lib/UniswapV3CallbackValidation.sol';
 
 contract ArkenDexV3 is Ownable {
     using SafeERC20 for IERC20;
-    using SafeMath for uint256;
 
     uint256 constant MAX_INT = 2**256 - 1;
     uint256 public constant _DEADLINE_ = 2**256 - 1;
@@ -189,6 +187,10 @@ contract ArkenDexV3 is Ownable {
 
     function trade(TradeDescription memory desc) external payable {
         require(desc.amountIn > 0, 'Amount-in needs to be more than zero');
+        require(
+            desc.amountOutMin > 0,
+            'Amount-out minimum needs to be more than zero'
+        );
         if (_ETH_ == desc.srcToken) {
             require(
                 desc.amountIn == msg.value,
@@ -213,9 +215,8 @@ contract ArkenDexV3 is Ownable {
             }
         }
 
-        uint256 receivedAmt = _getBalance(desc.dstToken, desc.to).sub(
-            beforeDstAmt
-        );
+        uint256 receivedAmt = _getBalance(desc.dstToken, desc.to) -
+            beforeDstAmt;
         require(
             receivedAmt >= desc.amountOutMin,
             'Received token is not enough'
@@ -314,11 +315,13 @@ contract ArkenDexV3 is Ownable {
         }
         uint256 amountIn;
         if (route.from == address(0)) {
-            amountIn = IERC20(
-                route.fromToken == _WETH_DFYN_ ? _WETH_ : route.fromToken
-            ).balanceOf(address(this)).mul(route.part).div(100000000);
+            amountIn =
+                (IERC20(
+                    route.fromToken == _WETH_DFYN_ ? _WETH_ : route.fromToken
+                ).balanceOf(address(this)) * route.part) /
+                100000000;
         } else if (route.from == address(1)) {
-            amountIn = data.amountIn.mul(route.part).div(100000000);
+            amountIn = (data.amountIn * route.part) / 100000000;
         }
         if (route.dexInterface == RouterInterface.UNISWAP_V2) {
             _tradeUniswapV2(route, amountIn, desc, data);
@@ -341,7 +344,7 @@ contract ArkenDexV3 is Ownable {
         } else if (route.dexInterface == RouterInterface.UNISWAP_V3) {
             _tradeUniswapV3(route, amountIn, desc);
         } else {
-            require(false, 'unknown router interface');
+            revert('unknown router interface');
         }
     }
 
@@ -368,9 +371,9 @@ contract ArkenDexV3 is Ownable {
             pair.token0()
             ? (reserve0, reserve1)
             : (reserve1, reserve0);
-        amountIn = IERC20(route.fromToken).balanceOf(route.lpAddress).sub(
-            reserveFrom
-        );
+        amountIn =
+            IERC20(route.fromToken).balanceOf(route.lpAddress) -
+            reserveFrom;
         uint256 amountOut = UniswapV2Library.getAmountOut(
             amountIn,
             reserveFrom,
@@ -428,9 +431,9 @@ contract ArkenDexV3 is Ownable {
             pair.token0()
             ? (reserve0, reserve1)
             : (reserve1, reserve0);
-        amountIn = IERC20(route.fromToken).balanceOf(route.lpAddress).sub(
-            reserveFrom
-        );
+        amountIn =
+            IERC20(route.fromToken).balanceOf(route.lpAddress) -
+            reserveFrom;
         uint256 amountOut = UniswapV2Library.getAmountOut(
             amountIn,
             reserveFrom,
@@ -614,7 +617,7 @@ contract ArkenDexV3 is Ownable {
     {
         uint256 fee = _calculateFee(amount);
         require(fee < amount, 'Fee exceeds amount');
-        remainingAmount = amount.sub(fee);
+        remainingAmount = amount - fee;
         if (_ETH_ == token) {
             (bool sent, ) = _FEE_WALLET_ADDR_.call{value: fee}('');
             require(sent, 'Failed to send Ether too fee');
@@ -624,7 +627,7 @@ contract ArkenDexV3 is Ownable {
     }
 
     function _calculateFee(uint256 amount) internal pure returns (uint256 fee) {
-        return amount.div(1000);
+        return amount / 1000;
     }
 
     // internal functions
@@ -636,7 +639,7 @@ contract ArkenDexV3 is Ownable {
         address srcToken,
         TradeData memory data
     ) internal {
-        data.amountIn = data.amountIn.sub(amount);
+        data.amountIn = data.amountIn - amount;
         if (srcToken != _ETH_) {
             IArkenApprove(_ARKEN_APPROVE_).transferToken(
                 address(token),
@@ -667,7 +670,7 @@ contract ArkenDexV3 is Ownable {
     ) internal {
         uint256 allowance = IERC20(token).allowance(address(this), spender);
         if (amount > allowance) {
-            uint256 increaseAmount = MAX_INT.sub(allowance);
+            uint256 increaseAmount = MAX_INT - allowance;
             IERC20(token).safeIncreaseAllowance(spender, increaseAmount);
         }
     }
@@ -700,7 +703,7 @@ contract ArkenDexV3 is Ownable {
         uint256 beforeAmount = dstToken.balanceOf(desc.to);
         dstToken.safeTransfer(desc.to, returnAmount);
         uint256 afterAmount = dstToken.balanceOf(desc.to);
-        uint256 got = afterAmount.sub(beforeAmount);
+        uint256 got = afterAmount - beforeAmount;
         require(got == returnAmount, 'ArkenTester: Has Tax');
     }
 }
