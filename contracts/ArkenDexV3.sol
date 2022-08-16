@@ -5,6 +5,7 @@ pragma experimental ABIEncoderV2;
 
 import '@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol';
 import '@openzeppelin/contracts/access/Ownable.sol';
+import '@openzeppelin/contracts/utils/Address.sol';
 import '@uniswap/v2-core/contracts/interfaces/IUniswapV2Pair.sol';
 import '@uniswap/v2-periphery/contracts/interfaces/IUniswapV2Router01.sol';
 import '@uniswap/v3-core/contracts/interfaces/IUniswapV3Pool.sol';
@@ -13,17 +14,21 @@ import './interfaces/IDODOV2.sol';
 import './interfaces/IWETH.sol';
 import './interfaces/IVyperSwap.sol';
 import './interfaces/IVyperUnderlyingSwap.sol';
-import './interfaces/IDoppleSwap.sol';
+import './interfaces/ISaddleDex.sol';
 import './interfaces/IDODOV2Proxy.sol';
 import './interfaces/IBalancer.sol';
+import './interfaces/ICurveTricryptoV2.sol';
 import './interfaces/IArkenApprove.sol';
+import './interfaces/IDMMPool.sol';
 import './lib/UniswapV2Library.sol';
+import './lib/DMMLibrary.sol';
 import './lib/UniswapV3CallbackValidation.sol';
 
 // import 'hardhat/console.sol';
 
 contract ArkenDexV3 is Ownable {
     using SafeERC20 for IERC20;
+    using Address for address;
 
     uint256 constant MAX_INT = 2**256 - 1;
     uint256 public constant _DEADLINE_ = 2**256 - 1;
@@ -50,6 +55,12 @@ contract ArkenDexV3 is Ownable {
     ==============================================================================
     */
     event Swapped(
+        address srcToken,
+        address dstToken,
+        uint256 amountIn,
+        uint256 returnAmount
+    );
+    event SwappedStopLimit(
         address srcToken,
         address dstToken,
         uint256 amountIn,
@@ -145,12 +156,15 @@ contract ArkenDexV3 is Ownable {
         BAKERY,
         VYPER,
         VYPER_UNDERLYING,
-        DOPPLE,
+        SADDLE,
         DODO_V2,
         DODO_V1,
         DFYN,
         BALANCER,
-        UNISWAP_V3
+        UNISWAP_V3,
+        CURVE_TRICRYPTO_V2,
+        LIMIT_ORDER_PROTOCOL_V2,
+        KYBER_DMM
     }
     struct TradeRoute {
         address routerAddress;
@@ -204,7 +218,32 @@ contract ArkenDexV3 is Ownable {
 
         uint256 beforeDstAmt = _getBalance(desc.dstToken, desc.to);
 
-        uint256 returnAmount = _trade(desc);
+        TradeData memory data = TradeData({amountIn: desc.amountIn});
+        if (desc.isSourceFee) {
+            if (_ETH_ == desc.srcToken) {
+                data.amountIn = _collectFee(desc.amountIn, desc.srcToken);
+            } else {
+                uint256 fee = _calculateFee(desc.amountIn);
+                require(fee < desc.amountIn, 'Fee exceeds amount');
+                _transferFromSender(
+                    desc.srcToken,
+                    _FEE_WALLET_ADDR_,
+                    fee,
+                    desc.srcToken,
+                    data
+                );
+            }
+        }
+
+        uint256 returnAmount = _trade(desc, data);
+
+        if (!desc.isSourceFee) {
+            require(
+                returnAmount >= desc.amountOutMin && returnAmount > 0,
+                'Return amount is not enough'
+            );
+            returnAmount = _collectFee(returnAmount, desc.dstToken);
+        }
 
         if (returnAmount > 0) {
             if (_ETH_ == desc.dstToken) {
@@ -225,26 +264,106 @@ contract ArkenDexV3 is Ownable {
         emit Swapped(desc.srcToken, desc.dstToken, desc.amountIn, receivedAmt);
     }
 
-    function _trade(TradeDescription memory desc)
-        internal
-        returns (uint256 returnAmount)
-    {
+    function tradeStopLimit(
+        TradeDescription memory desc,
+        uint256 stopLimitFee,
+        uint256 minimumStopLimitFee
+    ) external payable {
+        require(desc.amountIn > 0, 'Amount-in needs to be more than zero');
+        require(
+            desc.amountOutMin > 0,
+            'Amount-out minimum needs to be more than zero'
+        );
+
         TradeData memory data = TradeData({amountIn: desc.amountIn});
+        if (_ETH_ == desc.srcToken) {
+            require(
+                desc.amountIn == msg.value,
+                'Ether value not match amount-in'
+            );
+            require(
+                desc.isRouterSource,
+                'Source token Ether requires isRouterSource=true'
+            );
+        } else {
+            uint256 balanceSrcAmt = _getBalance(desc.srcToken, msg.sender);
+            if (balanceSrcAmt < data.amountIn) {
+                data.amountIn = balanceSrcAmt;
+            }
+        }
+        require(stopLimitFee >= 10, 'Fee is too low');
+        uint256 beforeDstAmt = _getBalance(desc.dstToken, desc.to);
+
         if (desc.isSourceFee) {
             if (_ETH_ == desc.srcToken) {
-                data.amountIn = _collectFee(desc.amountIn, desc.srcToken);
+                data.amountIn = _collectStopLimitFee(
+                    desc.amountIn,
+                    desc.srcToken,
+                    stopLimitFee,
+                    minimumStopLimitFee
+                );
             } else {
-                uint256 fee = _calculateFee(desc.amountIn);
-                require(fee < desc.amountIn, 'Fee exceeds amount');
+                uint256 feeAmount = _calculateStopLimitFee(
+                    desc.amountIn,
+                    stopLimitFee
+                );
+                if (feeAmount < minimumStopLimitFee) {
+                    feeAmount = minimumStopLimitFee;
+                }
+                require(feeAmount < desc.amountIn, 'Fee exceeds amount');
                 _transferFromSender(
                     desc.srcToken,
                     _FEE_WALLET_ADDR_,
-                    fee,
+                    feeAmount,
                     desc.srcToken,
                     data
                 );
             }
         }
+
+        uint256 returnAmount = _trade(desc, data);
+
+        if (!desc.isSourceFee) {
+            require(
+                returnAmount >= desc.amountOutMin && returnAmount > 0,
+                'Return amount is not enough'
+            );
+            returnAmount = _collectStopLimitFee(
+                returnAmount,
+                desc.dstToken,
+                stopLimitFee,
+                minimumStopLimitFee
+            );
+        }
+
+        if (returnAmount > 0) {
+            if (_ETH_ == desc.dstToken) {
+                (bool sent, ) = desc.to.call{value: returnAmount}('');
+                require(sent, 'Failed to send Ether');
+            } else {
+                IERC20(desc.dstToken).safeTransfer(desc.to, returnAmount);
+            }
+        }
+
+        uint256 receivedAmt = _getBalance(desc.dstToken, desc.to) -
+            beforeDstAmt;
+        require(
+            receivedAmt >= desc.amountOutMin,
+            'Received token is not enough'
+        );
+
+        emit SwappedStopLimit(
+            desc.srcToken,
+            desc.dstToken,
+            desc.amountIn,
+            receivedAmt
+        );
+    }
+
+    function _trade(TradeDescription memory desc, TradeData memory data)
+        internal
+        returns (uint256 returnAmount)
+    {
         if (desc.isRouterSource && _ETH_ != desc.srcToken) {
             _transferFromSender(
                 desc.srcToken,
@@ -267,13 +386,6 @@ contract ArkenDexV3 is Ownable {
             _unwrapEther(_WETH_, returnAmount);
         } else {
             returnAmount = IERC20(desc.dstToken).balanceOf(address(this));
-        }
-        if (!desc.isSourceFee) {
-            require(
-                returnAmount >= desc.amountOutMin && returnAmount > 0,
-                'Return amount is not enough'
-            );
-            returnAmount = _collectFee(returnAmount, desc.dstToken);
         }
     }
 
@@ -337,14 +449,73 @@ contract ArkenDexV3 is Ownable {
             _tradeVyper(route, amountIn);
         } else if (route.dexInterface == RouterInterface.VYPER_UNDERLYING) {
             _tradeVyperUnderlying(route, amountIn);
-        } else if (route.dexInterface == RouterInterface.DOPPLE) {
-            _tradeDopple(route, amountIn);
+        } else if (route.dexInterface == RouterInterface.SADDLE) {
+            _tradeSaddle(route, amountIn);
         } else if (route.dexInterface == RouterInterface.BALANCER) {
             _tradeBalancer(route, amountIn);
         } else if (route.dexInterface == RouterInterface.UNISWAP_V3) {
             _tradeUniswapV3(route, amountIn, desc);
+        } else if (route.dexInterface == RouterInterface.CURVE_TRICRYPTO_V2) {
+            _tradeCurveTricryptoV2(route, amountIn);
+        } else if (route.dexInterface == RouterInterface.KYBER_DMM) {
+            _tradeKyberDMM(route, amountIn, desc, data);
         } else {
             revert('unknown router interface');
+        }
+    }
+
+    function _tradeKyberDMM(
+        TradeRoute memory route,
+        uint256 amountIn,
+        TradeDescription memory desc,
+        TradeData memory data
+    ) internal {
+        if (route.from == address(0)) {
+            IERC20(route.fromToken).safeTransfer(route.lpAddress, amountIn);
+        } else if (route.from == address(1)) {
+            _transferFromSender(
+                route.fromToken,
+                route.lpAddress,
+                amountIn,
+                desc.srcToken,
+                data
+            );
+        }
+        IDMMPool pair = IDMMPool(route.lpAddress);
+        (
+            uint112 reserve0,
+            uint112 reserve1,
+            uint112 _vReserve0,
+            uint112 _vReserve1,
+            uint256 feeInPrecision
+        ) = pair.getTradeInfo();
+        if (route.fromToken != address(pair.token0())) {
+            (reserve1, reserve0, _vReserve1, _vReserve0) = (
+                reserve0,
+                reserve1,
+                _vReserve0,
+                _vReserve1
+            );
+        }
+        amountIn =
+            IERC20(route.fromToken).balanceOf(route.lpAddress) -
+            reserve0;
+        uint256 amountOut = DMMLibrary.getAmountOut(
+            amountIn,
+            reserve0,
+            reserve1,
+            _vReserve0,
+            _vReserve1,
+            feeInPrecision
+        );
+
+        address to = route.to;
+        if (to == address(0)) to = address(this);
+        if (to == address(1)) to = desc.to;
+        if (route.toToken == address(pair.token0())) {
+            pair.swap(amountOut, 0, to, '');
+        } else {
+            pair.swap(0, amountOut, to, '');
         }
     }
 
@@ -520,6 +691,20 @@ contract ArkenDexV3 is Ownable {
         );
     }
 
+    function _tradeCurveTricryptoV2(TradeRoute memory route, uint256 amountIn)
+        internal
+    {
+        require(route.from == address(0), 'route.from should be zero address');
+        _increaseAllowance(route.fromToken, route.routerAddress, amountIn);
+        ICurveTricryptoV2(route.routerAddress).exchange(
+            uint16(route.fromTokenIndex),
+            uint16(route.toTokenIndex),
+            amountIn,
+            0,
+            false
+        );
+    }
+
     function _tradeVyper(TradeRoute memory route, uint256 amountIn) internal {
         require(route.from == address(0), 'route.from should be zero address');
         _increaseAllowance(route.fromToken, route.routerAddress, amountIn);
@@ -544,13 +729,13 @@ contract ArkenDexV3 is Ownable {
         );
     }
 
-    function _tradeDopple(TradeRoute memory route, uint256 amountIn) internal {
+    function _tradeSaddle(TradeRoute memory route, uint256 amountIn) internal {
         require(route.from == address(0), 'route.from should be zero address');
         _increaseAllowance(route.fromToken, route.routerAddress, amountIn);
-        IDoppleSwap doppleSwap = IDoppleSwap(route.routerAddress);
-        uint8 tokenIndexFrom = doppleSwap.getTokenIndex(route.fromToken);
-        uint8 tokenIndexTo = doppleSwap.getTokenIndex(route.toToken);
-        doppleSwap.swap(tokenIndexFrom, tokenIndexTo, amountIn, 0, _DEADLINE_);
+        ISaddleDex dex = ISaddleDex(route.routerAddress);
+        uint8 tokenIndexFrom = dex.getTokenIndex(route.fromToken);
+        uint8 tokenIndexTo = dex.getTokenIndex(route.toToken);
+        dex.swap(tokenIndexFrom, tokenIndexTo, amountIn, 0, _DEADLINE_);
     }
 
     function _tradeBalancer(TradeRoute memory route, uint256 amountIn)
@@ -630,6 +815,34 @@ contract ArkenDexV3 is Ownable {
         return amount / 1000;
     }
 
+    function _collectStopLimitFee(
+        uint256 amount,
+        address token,
+        uint256 stopLimitFee,
+        uint256 minimumStopLimitFee
+    ) internal returns (uint256 remainingAmount) {
+        uint256 feeAmount = _calculateStopLimitFee(amount, stopLimitFee);
+        if (feeAmount < minimumStopLimitFee) {
+            feeAmount = minimumStopLimitFee;
+        }
+        require(feeAmount < amount, 'Fee exceeds amount');
+        remainingAmount = amount - feeAmount;
+        if (_ETH_ == token) {
+            (bool sent, ) = _FEE_WALLET_ADDR_.call{value: feeAmount}('');
+            require(sent, 'Failed to send Ether too fee');
+        } else {
+            IERC20(token).safeTransfer(_FEE_WALLET_ADDR_, feeAmount);
+        }
+    }
+
+    function _calculateStopLimitFee(uint256 amount, uint256 stopLimitFee)
+        internal
+        pure
+        returns (uint256)
+    {
+        return (amount * stopLimitFee) / 10000;
+    }
+
     // internal functions
 
     function _transferFromSender(
@@ -699,7 +912,8 @@ contract ArkenDexV3 is Ownable {
         returns (uint256 returnAmount)
     {
         IERC20 dstToken = IERC20(desc.dstToken);
-        returnAmount = _trade(desc);
+        TradeData memory data = TradeData({amountIn: desc.amountIn});
+        returnAmount = _trade(desc, data);
         uint256 beforeAmount = dstToken.balanceOf(desc.to);
         dstToken.safeTransfer(desc.to, returnAmount);
         uint256 afterAmount = dstToken.balanceOf(desc.to);
