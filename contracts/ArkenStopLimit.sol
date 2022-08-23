@@ -316,7 +316,7 @@ contract ArkenStopLimit is Ownable, Pausable, AccessControl {
         uint256 allowance = IERC20(token).allowance(address(this), spender);
         if (amount > allowance) {
             uint256 increaseAmount = MAX_INT - allowance;
-            IERC20(token).approve(spender, increaseAmount);
+            IERC20(token).safeIncreaseAllowance(spender, increaseAmount);
         }
     }
 
