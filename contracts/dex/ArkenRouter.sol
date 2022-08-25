@@ -23,8 +23,6 @@ contract ArkenRouter is ArkenSwapper {
     address public immutable WETH;
     address public immutable staker;
 
-    bytes32 public immutable PAIR_HASH;
-
     event Stake(
         address indexed user,
         address indexed tokenA,
@@ -48,13 +46,11 @@ contract ArkenRouter is ArkenSwapper {
         address _WETH,
         address _staker,
         address _swap,
-        address _swapApprove,
-        bytes32 _pairHash
+        address _swapApprove
     ) ArkenSwapper(_swap, _swapApprove) {
         factory = _factory;
         WETH = _WETH;
         staker = _staker;
-        PAIR_HASH = _pairHash;
     }
 
     receive() external payable {
@@ -77,8 +73,7 @@ contract ArkenRouter is ArkenSwapper {
         (uint256 reserve0, uint256 reserve1) = ArkenLPLibrary.getReserves(
             factory,
             token0,
-            token1,
-            PAIR_HASH
+            token1
         );
         if (tokenIn == token0) {
             TransferHelper.safeTransfer(token0, pair, amountIn);
@@ -121,24 +116,12 @@ contract ArkenRouter is ArkenSwapper {
         );
         if (tokenIn == token0) {
             (uint256 amount0In, uint256 amount1Out) = ArkenLPLibrary
-                .getAmountSwapRetainRatio(
-                    factory,
-                    token0,
-                    tokenB,
-                    amountIn,
-                    PAIR_HASH
-                );
+                .getAmountSwapRetainRatio(factory, token0, tokenB, amountIn);
             TransferHelper.safeTransfer(token0, pair, amount0In);
             IUniswapV2Pair(pair).swap(0, amount1Out, to, '');
         } else {
             (uint256 amount1In, uint256 amount0Out) = ArkenLPLibrary
-                .getAmountSwapRetainRatio(
-                    factory,
-                    tokenB,
-                    tokenA,
-                    amountIn,
-                    PAIR_HASH
-                );
+                .getAmountSwapRetainRatio(factory, tokenB, tokenA, amountIn);
             TransferHelper.safeTransfer(token1, pair, amount1In);
             IUniswapV2Pair(pair).swap(amount0Out, 0, to, '');
         }
@@ -418,8 +401,7 @@ contract ArkenRouter is ArkenSwapper {
         (uint256 reserveA, uint256 reserveB) = ArkenLPLibrary.getReserves(
             factory,
             tokenA,
-            tokenB,
-            PAIR_HASH
+            tokenB
         );
         if (reserveA == 0 && reserveB == 0) {
             (amountA, amountB) = (amountADesired, amountBDesired);
@@ -510,7 +492,7 @@ contract ArkenRouter is ArkenSwapper {
             amountTokenMin,
             amountETHMin
         );
-        address pair = ArkenLPLibrary.pairFor(factory, token, WETH, PAIR_HASH);
+        address pair = ArkenLPLibrary.pairFor(factory, token, WETH);
         TransferHelper.safeTransferFrom(token, msg.sender, pair, amountToken);
         IWETH(WETH).deposit{value: amountETH}();
         assert(IWETH(WETH).transfer(pair, amountETH));
@@ -628,7 +610,7 @@ contract ArkenRouter is ArkenSwapper {
         virtual
         returns (uint256[] memory amounts)
     {
-        return ArkenLPLibrary.getAmountsOut(factory, amountIn, path, PAIR_HASH);
+        return ArkenLPLibrary.getAmountsOut(factory, amountIn, path);
     }
 
     function getAmountsIn(uint256 amountOut, address[] memory path)
@@ -637,7 +619,7 @@ contract ArkenRouter is ArkenSwapper {
         virtual
         returns (uint256[] memory amounts)
     {
-        return ArkenLPLibrary.getAmountsIn(factory, amountOut, path, PAIR_HASH);
+        return ArkenLPLibrary.getAmountsIn(factory, amountOut, path);
     }
 
     function pairFor(address tokenA, address tokenB)
@@ -646,7 +628,7 @@ contract ArkenRouter is ArkenSwapper {
         virtual
         returns (address pair)
     {
-        return ArkenLPLibrary.pairFor(factory, tokenA, tokenB, PAIR_HASH);
+        return ArkenLPLibrary.pairFor(factory, tokenA, tokenB);
     }
 
     function _increasePairAllowance(

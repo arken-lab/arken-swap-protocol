@@ -8,6 +8,7 @@ import 'hardhat/console.sol';
 
 import '../../lib/Babylonian.sol';
 import '../interfaces/IUniswapV2Pair.sol';
+import '../interfaces/IUniswapV2Factory.sol';
 
 library ArkenLPLibrary {
     // returns sorted token addresses, used to handle return values from pairs sorted in this order
@@ -27,37 +28,20 @@ library ArkenLPLibrary {
     function pairFor(
         address factory,
         address tokenA,
-        address tokenB,
-        bytes32 pairHash
-    ) internal pure returns (address pair) {
-        (address token0, address token1) = sortTokens(tokenA, tokenB);
-        pair = address(
-            uint160(
-                uint256(
-                    keccak256(
-                        abi.encodePacked(
-                            bytes1(0xff),
-                            factory,
-                            keccak256(abi.encodePacked(token0, token1)),
-                            pairHash
-                            // hex'838ecc70875b1f449bd6a342299b21851b0f5357d6e72c908e26986c5fad482d' // init code hash // CHANGE THIS FOR AUTOMATED TEST if you experience `function returned an unexpected amount of data`
-                        )
-                    )
-                )
-            )
-        );
+        address tokenB
+    ) internal view returns (address pair) {
+        return IUniswapV2Factory(factory).getPair(tokenA, tokenB);
     }
 
     // fetches and sorts the reserves for a pair
     function getReserves(
         address factory,
         address tokenA,
-        address tokenB,
-        bytes32 pairHash
+        address tokenB
     ) internal view returns (uint256 reserveA, uint256 reserveB) {
         (address token0, ) = sortTokens(tokenA, tokenB);
         (uint256 reserve0, uint256 reserve1, ) = IUniswapV2Pair(
-            pairFor(factory, tokenA, tokenB, pairHash)
+            pairFor(factory, tokenA, tokenB)
         ).getReserves();
         (reserveA, reserveB) = tokenA == token0
             ? (reserve0, reserve1)
@@ -115,8 +99,7 @@ library ArkenLPLibrary {
     function getAmountsOut(
         address factory,
         uint256 amountIn,
-        address[] memory path,
-        bytes32 pairHash
+        address[] memory path
     ) internal view returns (uint256[] memory amounts) {
         require(path.length >= 2, 'UniswapV2Library: INVALID_PATH');
         amounts = new uint256[](path.length);
@@ -125,8 +108,7 @@ library ArkenLPLibrary {
             (uint256 reserveIn, uint256 reserveOut) = getReserves(
                 factory,
                 path[i],
-                path[i + 1],
-                pairHash
+                path[i + 1]
             );
             amounts[i + 1] = getAmountOut(amounts[i], reserveIn, reserveOut);
         }
@@ -136,8 +118,7 @@ library ArkenLPLibrary {
     function getAmountsIn(
         address factory,
         uint256 amountOut,
-        address[] memory path,
-        bytes32 pairHash
+        address[] memory path
     ) internal view returns (uint256[] memory amounts) {
         require(path.length >= 2, 'UniswapV2Library: INVALID_PATH');
         amounts = new uint256[](path.length);
@@ -146,8 +127,7 @@ library ArkenLPLibrary {
             (uint256 reserveIn, uint256 reserveOut) = getReserves(
                 factory,
                 path[i - 1],
-                path[i],
-                pairHash
+                path[i]
             );
             amounts[i - 1] = getAmountIn(amounts[i], reserveIn, reserveOut);
         }
@@ -157,14 +137,12 @@ library ArkenLPLibrary {
         address factory,
         address tokenIn,
         address tokenOut,
-        uint256 amountIn,
-        bytes32 pairHash
+        uint256 amountIn
     ) internal view returns (uint256 amountInSwap, uint256 amountOut) {
         (uint256 reserveIn, uint256 reserveOut) = getReserves(
             factory,
             tokenIn,
-            tokenOut,
-            pairHash
+            tokenOut
         );
         amountInSwap =
             Babylonian.sqrt((amountIn * reserveIn) + (reserveIn * reserveIn)) -
