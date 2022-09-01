@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-pragma solidity =0.8.11;
+pragma solidity =0.8.16;
 
 import '@openzeppelin/contracts/access/Ownable.sol';
 import './interfaces/IUniswapV2Factory.sol';
@@ -12,6 +12,12 @@ contract ArkenPairFactory is Ownable, IUniswapV2Factory {
 
     mapping(address => mapping(address => address)) public override getPair;
     address[] public override allPairs;
+
+    event UpdateFeeTo(address indexed newFeeTo, address indexed oldFeeTo);
+    event UpdateFeeToSetter(
+        address indexed newFeeToSetter,
+        address indexed oldFeeToSetter
+    );
 
     constructor(address _feeToSetter) {
         feeToSetter = _feeToSetter;
@@ -49,11 +55,13 @@ contract ArkenPairFactory is Ownable, IUniswapV2Factory {
 
     function setFeeTo(address _feeTo) external override {
         require(msg.sender == feeToSetter, 'ArkenPairFactory: FORBIDDEN');
+        emit UpdateFeeTo(_feeTo, feeTo);
         feeTo = _feeTo;
     }
 
     function setFeeToSetter(address _feeToSetter) external override {
         require(msg.sender == feeToSetter, 'ArkenPairFactory: FORBIDDEN');
+        emit UpdateFeeToSetter(_feeToSetter, feeToSetter);
         feeToSetter = _feeToSetter;
     }
 }

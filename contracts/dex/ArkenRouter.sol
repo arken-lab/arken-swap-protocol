@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-pragma solidity =0.8.11;
+pragma solidity =0.8.16;
 
 //solhint-disable not-rely-on-time
 //solhint-disable var-name-mixedcase
@@ -19,8 +19,8 @@ import './libraries/ArkenLPLibrary.sol';
 contract ArkenRouter is ArkenSwapper {
     using SafeERC20 for IERC20;
 
-    address public immutable factory;
     address public immutable WETH;
+    address public immutable factory;
     address public immutable staker;
 
     event Stake(
@@ -536,7 +536,7 @@ contract ArkenRouter is ArkenSwapper {
         address to,
         uint256 deadline
     )
-        public
+        external
         virtual
         ensure(deadline)
         returns (uint256 amountA, uint256 amountB)
@@ -560,7 +560,7 @@ contract ArkenRouter is ArkenSwapper {
         address to,
         uint256 deadline
     )
-        public
+        external
         virtual
         ensure(deadline)
         returns (uint256 amountToken, uint256 amountETH)

@@ -4,13 +4,14 @@ pragma solidity ^0.8.0;
 
 import '@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol';
 
+
 /**
  * @title Fabric
  * @dev Create deterministics vaults.
  */
 library Fabric {
     using SafeERC20 for IERC20;
-
+    
     /*Vault bytecode
         def _fallback() payable:
             call cd[56] with:
@@ -45,60 +46,55 @@ library Fabric {
         0x32    - ORIGIN (B)                  // Dest funds for selfdestruct
         0xff    - SELFDESTRUCT (B)            // selfdestruct contract, end of execution
     */
-    bytes public constant code =
-        hex'6012600081600A8239F360008060448082803781806038355AF132FF';
-    bytes32 public constant vaultCodeHash =
-        bytes32(
-            0xfa3da1081bc86587310fce8f3a5309785fc567b9b20875900cb289302d6bfa97
-        );
+    bytes public constant code = hex"6012600081600A8239F360008060448082803781806038355AF132FF";
+    bytes32 public constant vaultCodeHash = bytes32(0xfa3da1081bc86587310fce8f3a5309785fc567b9b20875900cb289302d6bfa97);
 
     /**
-     * @dev Get a deterministics vault.
-     */
+    * @dev Get a deterministics vault.
+    */
     function getVault(bytes32 _key) internal view returns (address) {
-        return
-            address(
-                uint160(
-                    uint256(
-                        keccak256(
-                            abi.encodePacked(
-                                bytes1(0xff),
-                                address(this),
-                                _key,
-                                vaultCodeHash
-                            )
+        return address(
+            uint160(
+                uint(
+                    keccak256(
+                        abi.encodePacked(
+                            bytes1(0xff),
+                            address(this),
+                            _key,
+                            vaultCodeHash
                         )
                     )
                 )
-            );
+            )
+        );
     }
 
     /**
-     * @dev Create deterministic vault.
-     */
-    function executeVault(
-        bytes32 _key,
-        IERC20 _token,
-        address _to
-    ) internal returns (uint256 value) {
+    * @dev Create deterministic vault.
+    */
+    function executeVault(bytes32 _key, IERC20 _token, address _to) internal returns (uint256 value) {
         address addr;
         bytes memory slotcode = code;
 
         /* solium-disable-next-line */
-        assembly {
-            // Create the contract arguments for the constructor
-            addr := create2(0, add(slotcode, 0x20), mload(slotcode), _key)
+        assembly{
+          // Create the contract arguments for the constructor
+          addr := create2(0, add(slotcode, 0x20), mload(slotcode), _key)
         }
 
         value = _token.balanceOf(addr);
         /* solium-disable-next-line */
         (bool success, ) = addr.call(
             abi.encodePacked(
-                abi.encodeWithSelector(_token.transfer.selector, _to, value),
+                abi.encodeWithSelector(
+                    _token.transfer.selector,
+                    _to,
+                    value
+                ),
                 address(_token)
             )
         );
 
-        require(success, 'Error pulling tokens');
+        require(success, "Error pulling tokens");
     }
 }

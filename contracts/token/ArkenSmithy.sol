@@ -1,12 +1,14 @@
 // SPDX-License-Identifier: UNLICENSED
 
-pragma solidity =0.8.11;
+pragma solidity =0.8.16;
 
 import '@openzeppelin/contracts/access/Ownable.sol';
+import '@openzeppelin/contracts/utils/Address.sol';
 import '@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol';
 import '@openzeppelin/contracts/security/ReentrancyGuard.sol';
 
 import './ArkenToken.sol';
+import '../interfaces/IArkenSmithyPool.sol';
 
 /// @notice This contract is the only address who can mint new ARKENs.
 ///     This is designed to be plug-and-rewards with new Arken products,
@@ -110,6 +112,11 @@ contract ArkenSmithy is Ownable, ReentrancyGuard {
         if (_withUpdate) {
             massUpdatePools();
         }
+        _handleArkenPerBlockChange(
+            poolAdmins[_pid],
+            poolInfos[_pid].arkenPerBlock,
+            _arkenPerBlock
+        );
         totalArkenPerBlock =
             totalArkenPerBlock -
             poolInfos[_pid].arkenPerBlock +
@@ -126,8 +133,18 @@ contract ArkenSmithy is Ownable, ReentrancyGuard {
             msg.sender == poolAdmins[_pid] || msg.sender == owner(),
             'ArkenSmithy: NON_AUTHORIZED_POOL_OWNER'
         );
+        _handleArkenPerBlockChange(
+            poolAdmins[_pid],
+            poolInfos[_pid].arkenPerBlock,
+            0
+        );
         address _oldAdmin = poolAdmins[_pid];
         poolAdmins[_pid] = _newAdmin;
+        _handleArkenPerBlockChange(
+            poolAdmins[_pid],
+            0,
+            poolInfos[_pid].arkenPerBlock
+        );
         emit UpdatePoolAdmin(_pid, _oldAdmin, _newAdmin);
     }
 
@@ -151,6 +168,11 @@ contract ArkenSmithy is Ownable, ReentrancyGuard {
         for (uint256 i = 0; i < _pids.length; i++) {
             uint256 _pid = _pids[i];
             uint256 _arkenPerBlock = _arkenPerBlocks[i];
+            _handleArkenPerBlockChange(
+                poolAdmins[_pid],
+                poolInfos[_pid].arkenPerBlock,
+                _arkenPerBlock
+            );
             newTotalArkenPerBlock =
                 newTotalArkenPerBlock -
                 poolInfos[_pid].arkenPerBlock +
@@ -269,6 +291,23 @@ contract ArkenSmithy is Ownable, ReentrancyGuard {
     function _sendArken(address _to, uint256 _amount) internal {
         if (_amount > 0) {
             ARKEN.transfer(_to, _amount);
+        }
+    }
+
+    function _handleArkenPerBlockChange(
+        address handler,
+        uint256 oldPerBlock,
+        uint256 newPerBlock
+    ) internal {
+        if (handler != address(0) && Address.isContract(handler)) {
+            (bool _optionalSuccess, ) = handler.call(
+                abi.encodeWithSignature(
+                    'handleArkenPerBlockChange(uint256,uint256)',
+                    oldPerBlock,
+                    newPerBlock
+                )
+            );
+            assert(_optionalSuccess);
         }
     }
 }

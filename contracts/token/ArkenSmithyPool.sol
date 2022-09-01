@@ -1,16 +1,21 @@
 // SPDX-License-Identifier: UNLICENSED
 
-pragma solidity =0.8.11;
+pragma solidity =0.8.16;
 
 import '@openzeppelin/contracts/access/Ownable.sol';
 import '@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol';
 import '@openzeppelin/contracts/security/ReentrancyGuard.sol';
 
+import '../interfaces/IArkenSmithyPool.sol';
 import './ArkenSmithy.sol';
 import './ArkenToken.sol';
 
 /// @notice This is an extensible contract for every Arken product which needs to withdraw ARKEN from SMITHY.
-abstract contract ArkenSmithyPool is Ownable, ReentrancyGuard {
+abstract contract ArkenSmithyPool is
+    Ownable,
+    ReentrancyGuard,
+    IArkenSmithyPool
+{
     // Modified from PancakeSwap code:
     // MasterChef: https://github.com/pancakeswap/pancake-smart-contracts/blob/master/projects/farms-pools/contracts/MasterChef.sol
     // MasterChefV2: https://bscscan.com/address/0xa5f8C5Dbd5F286960b9d90548680aE5ebFf07652#code
@@ -65,4 +70,9 @@ abstract contract ArkenSmithyPool is Ownable, ReentrancyGuard {
     function _withdrawFromSmithy(address _to, uint256 _amount) internal {
         ARKEN_SMITHY.withdraw(_to, SMITHY_PID, _amount);
     }
+
+    function handleArkenPerBlockChange(
+        uint256 prevArkenPerBlock,
+        uint256 newArkenPerBlock
+    ) external virtual {}
 }

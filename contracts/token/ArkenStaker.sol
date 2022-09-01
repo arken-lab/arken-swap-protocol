@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: UNLICENSED
 
-pragma solidity =0.8.11;
+pragma solidity =0.8.16;
 
 import '@openzeppelin/contracts/access/Ownable.sol';
 import '@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol';
@@ -105,7 +105,7 @@ contract ArkenStaker is ArkenSmithyPool {
         uint256 _allocPoint,
         IERC20 _lpToken,
         bool _withUpdate
-    ) public onlyOwner {
+    ) external onlyOwner {
         require(
             _lpToken.balanceOf(address(this)) >= 0,
             'ArkenStaker: REQUIRE_LP_TOKEN_BALANCE'
@@ -132,7 +132,7 @@ contract ArkenStaker is ArkenSmithyPool {
         uint256[] calldata _pids,
         uint256[] calldata _allocPoints,
         bool _withUpdate
-    ) public onlyOwner {
+    ) external onlyOwner {
         require(
             _pids.length == _allocPoints.length,
             'ArkenSmithy: LENGTH_MISMATCH'
@@ -169,6 +169,10 @@ contract ArkenStaker is ArkenSmithyPool {
         }
     }
 
+    function handleArkenPerBlockChange(uint256, uint256) external override {
+        massUpdatePools();
+    }
+
     /// @notice Update reward variables for the given pool.
     /// @param _pid The id of the pool. See `poolInfos`.
     /// @return pool Returns the pool that was updated.
@@ -178,12 +182,10 @@ contract ArkenStaker is ArkenSmithyPool {
             uint256 lpSupply = pool.totalShare;
             if (lpSupply > 0 && totalAllocPoint > 0) {
                 uint256 multiplier = block.number - pool.lastRewardBlock;
-                uint256 arkenReward = (multiplier *
+                uint256 arkenReward = ((multiplier *
                     arkenPerBlock() *
-                    pool.allocPoint) / totalAllocPoint;
-                pool.accPerShare =
-                    pool.accPerShare +
-                    ((arkenReward * ACC_ARKEN_PRECISION) / lpSupply);
+                    pool.allocPoint) * ACC_ARKEN_PRECISION) / totalAllocPoint;
+                pool.accPerShare = pool.accPerShare + (arkenReward / lpSupply);
             }
             pool.lastRewardBlock = block.number;
             poolInfos[_pid] = pool;
@@ -328,12 +330,10 @@ contract ArkenStaker is ArkenSmithyPool {
             uint256 lpSupply = pool.totalShare;
             if (lpSupply > 0 && totalAllocPoint > 0) {
                 uint256 multiplier = block.number - pool.lastRewardBlock;
-                uint256 arkenReward = (multiplier *
+                uint256 arkenReward = ((multiplier *
                     arkenPerBlock() *
-                    pool.allocPoint) / totalAllocPoint;
-                pool.accPerShare =
-                    pool.accPerShare +
-                    ((arkenReward * ACC_ARKEN_PRECISION) / lpSupply);
+                    pool.allocPoint) * ACC_ARKEN_PRECISION) / totalAllocPoint;
+                pool.accPerShare = pool.accPerShare + (arkenReward / lpSupply);
             }
         }
 
@@ -360,8 +360,18 @@ contract ArkenStaker is ArkenSmithyPool {
         emit EmergencyWithdraw(_pid, msg.sender, amount);
     }
 
-    function getPoolId(address _lp) external view returns (uint256 pid) {
+    function getPoolId(address _lp) public view returns (uint256 pid) {
         pid = poolIds[_lp];
+    }
+
+    function getRewardPerBlock(address _lp)
+        public
+        view
+        returns (uint256 rewardPerBlock)
+    {
+        uint256 pid = getPoolId(_lp);
+        PoolInfo memory pool = poolInfos[pid];
+        rewardPerBlock = (arkenPerBlock() * pool.allocPoint) / totalAllocPoint;
     }
 
     function allowance(
@@ -376,7 +386,7 @@ contract ArkenStaker is ArkenSmithyPool {
         uint256 _pid,
         address _spender,
         uint256 _amount
-    ) public {
+    ) external {
         _approve(_pid, msg.sender, _spender, _amount);
     }
 

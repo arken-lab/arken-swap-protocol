@@ -39,6 +39,7 @@ abstract contract ArkenSwapper is Ownable {
                 desc.amountIn
             );
             _increaseAllowanceArkenDex(desc.srcToken, desc.amountIn);
+            desc.amountIn = IERC20(desc.srcToken).balanceOf(address(this));
             IArkenDexV3(swap).trade(desc);
         }
     }
