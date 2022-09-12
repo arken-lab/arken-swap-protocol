@@ -141,6 +141,8 @@ contract ArkenRouter is ArkenSwapper {
         uint256 pid = IArkenStaker(staker).getPoolId(pair);
         _increasePairAllowance(pair, staker, amount);
         IArkenStaker(staker).depositFor(pid, to, amount);
+        uint256 reward = IArkenStaker(staker).pendingArken(pid, to);
+        IArkenStaker(staker).settleReward(pid, to, reward, true);
         emit Stake(to, tokenA, tokenB, amount);
     }
 
@@ -179,7 +181,10 @@ contract ArkenRouter is ArkenSwapper {
         uint256 deadline,
         IArkenDexV3.TradeDescription memory tradeDesc
     ) external payable ensure(deadline) {
-        tradeDesc.to = payable(this); // force trade to router, for staking
+        require(
+            tradeDesc.to == address(this),
+            'ArkenRouter: STAKE_ANY_INCORRECT_TRADE_TO'
+        );
         _swapArkenDex(tradeDesc);
         _stakeSingleToken(
             tradeDesc.dstToken,
@@ -251,6 +256,8 @@ contract ArkenRouter is ArkenSwapper {
         address pair = pairFor(tokenA, tokenB);
         uint256 pid = IArkenStaker(staker).getPoolId(pair);
         IArkenStaker(staker).withdrawFor(pid, user, to, amount);
+        uint256 reward = IArkenStaker(staker).pendingArken(pid, user);
+        IArkenStaker(staker).settleReward(pid, user, reward, true);
         emit Unstake(to, tokenA, tokenB, amount);
     }
 
@@ -394,7 +401,7 @@ contract ArkenRouter is ArkenSwapper {
         uint256 amountAMin,
         uint256 amountBMin
     ) internal virtual returns (uint256 amountA, uint256 amountB) {
-        // create the pair if it doesn't exist yet
+        // The pair should already exists. Even if not, ArkenRouter should not be the one with the permission to create.
         if (IUniswapV2Factory(factory).getPair(tokenA, tokenB) == address(0)) {
             revert('ArkenRouter: PAIR_NOT_EXIST');
         }

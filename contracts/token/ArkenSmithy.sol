@@ -10,7 +10,7 @@ import '@openzeppelin/contracts/security/ReentrancyGuard.sol';
 import './ArkenToken.sol';
 import '../interfaces/IArkenSmithyPool.sol';
 
-/// @notice This contract is the only address who can mint new ARKENs.
+/// @notice
 ///     This is designed to be plug-and-rewards with new Arken products,
 ///         without the logic of LP or staking embedded into it.
 ///     Which differentiate this from PancakeSwap's MasterChef implementation.
@@ -227,12 +227,6 @@ contract ArkenSmithy is Ownable, ReentrancyGuard {
         return poolInfos[_pid].endRewardBlock;
     }
 
-    /// @notice Admin for a pool.
-    /// @param _pid The pool id.
-    function poolAdmin(uint256 _pid) public view returns (address) {
-        return poolAdmins[_pid];
-    }
-
     /// @notice Last reward block for a pool.
     /// @param _pid The pool id.
     function lastRewardBlock(uint256 _pid) public view returns (uint256) {
@@ -280,6 +274,10 @@ contract ArkenSmithy is Ownable, ReentrancyGuard {
         PoolInfo memory pool = updatePool(_pid);
         uint256 pendingAmount = pool.accumulatedArken;
         require(_amount <= pendingAmount, 'ArkenSmithy: SETTLE_EXCEED_PENDING');
+        require(
+            _amount <= ARKEN.balanceOf(address(this)),
+            'ArkenSmithy: NOT_ENOUGH_ARKEN'
+        );
         _sendArken(_to, _amount);
         pool.accumulatedArken = pendingAmount - _amount;
         poolInfos[_pid] = pool;

@@ -40,6 +40,7 @@ contract ArkenStaker is ArkenSmithyPool {
     struct UserInfo {
         uint256 amount;
         uint256 rewardDebt;
+        uint256 rewardPending;
     }
 
     /// @notice Stake pools for LPs
@@ -206,9 +207,7 @@ contract ArkenStaker is ArkenSmithyPool {
     ) internal {
         PoolInfo memory pool = updatePool(_pid);
         UserInfo memory userInfo = userInfos[_pid][_user];
-        if (userInfo.amount > 0) {
-            _settlePendingArken(_pid, _user, _user);
-        }
+        userInfo.rewardPending = _updatePendingArken(_pid, _user);
         if (_amount > 0) {
             IERC20 lpToken = lpTokens[_pid];
             uint256 before = lpToken.balanceOf(address(this));
@@ -251,7 +250,6 @@ contract ArkenStaker is ArkenSmithyPool {
         uint256 _pid,
         address _user,
         address _to,
-        address _rewardTo,
         uint256 _amount
     ) internal {
         PoolInfo memory pool = updatePool(_pid);
@@ -260,7 +258,7 @@ contract ArkenStaker is ArkenSmithyPool {
             _amount <= userInfo.amount,
             'ArkenStaker: INSUFFICIENT_STAKED_AMOUNT'
         );
-        _settlePendingArken(_pid, _user, _rewardTo);
+        userInfo.rewardPending = _updatePendingArken(_pid, _user);
         if (_amount > 0) {
             userInfo.amount = userInfo.amount - _amount;
             lpTokens[_pid].safeTransfer(_to, _amount);
@@ -283,7 +281,7 @@ contract ArkenStaker is ArkenSmithyPool {
         address _to,
         uint256 _amount
     ) external nonReentrant {
-        _withdraw(_pid, msg.sender, _to, _to, _amount);
+        _withdraw(_pid, msg.sender, _to, _amount);
         emit Withdraw(_pid, msg.sender, msg.sender, _to, _amount);
     }
 
@@ -299,28 +297,71 @@ contract ArkenStaker is ArkenSmithyPool {
         uint256 _amount
     ) external nonReentrant {
         _decreaseAllowance(_pid, _user, msg.sender, _amount);
-        _withdraw(_pid, _user, _to, _user, _amount);
+        _withdraw(_pid, _user, _to, _amount);
         emit Withdraw(_pid, _user, msg.sender, _to, _amount);
+    }
+
+    /// @notice Update pending ARKEN
+    /// @param _pid The id of the pool.
+    /// @param _user The user address.
+    function _updatePendingArken(uint256 _pid, address _user)
+        internal
+        view
+        returns (uint256 pending)
+    {
+        return
+            userInfos[_pid][_user].rewardPending +
+            _pendingFromLastUpdate(_pid, _user);
     }
 
     /// @notice Settles and distribute pending ARKEN
     /// @param _pid The id of the pool.
     /// @param _user The user address.
-    /// @param _to The address to settle pending ARKEN to.
+    /// @param _amount Amount of reward to settle.
     function _settlePendingArken(
         uint256 _pid,
         address _user,
-        address _to
+        uint256 _amount
     ) internal {
         UserInfo memory userInfo = userInfos[_pid][_user];
-        uint256 accArken = (userInfo.amount * poolInfos[_pid].accPerShare) /
-            ACC_ARKEN_PRECISION;
-        uint256 pending = accArken - userInfo.rewardDebt;
-        _withdrawFromSmithy(_to, pending);
+        userInfo.rewardPending = _updatePendingArken(_pid, _user);
+        require(
+            _amount <= userInfo.rewardPending,
+            'ArkenStaker: SETTLE_AMOUNT_EXCEEDS_PENDING'
+        );
+        _withdrawFromSmithy(_user, _amount);
+        userInfo.rewardPending -= _amount;
+        userInfos[_pid][_user] = userInfo;
     }
 
-    function pendingArken(uint256 _pid, address _user)
-        public
+    /// @notice Settles and distribute pending ARKEN
+    /// @param _pid The id of the pool.
+    /// @param _user The user address.
+    /// @param _amount Amount of reward to settle.
+    /// @param _settleForBalance true = if balance is below amount, settles for balance || false = if balance is below amount, revert
+    function settleReward(
+        uint256 _pid,
+        address _user,
+        uint256 _amount,
+        bool _settleForBalance
+    ) external {
+        uint256 amount = _amount;
+        uint256 smithyRewardBal = ARKEN.balanceOf(address(ARKEN_SMITHY));
+        if (_settleForBalance) {
+            if (smithyRewardBal < amount) {
+                amount = smithyRewardBal;
+            }
+        } else {
+            require(
+                _amount <= smithyRewardBal,
+                'ArkenStaker: SMITHY_NOT_ENOUGH_ARKEN'
+            );
+        }
+        _settlePendingArken(_pid, _user, _amount);
+    }
+
+    function _pendingFromLastUpdate(uint256 _pid, address _user)
+        internal
         view
         returns (uint256 pending)
     {
@@ -341,6 +382,16 @@ contract ArkenStaker is ArkenSmithyPool {
         uint256 accArken = (userInfo.amount * pool.accPerShare) /
             ACC_ARKEN_PRECISION;
         return accArken - userInfo.rewardDebt;
+    }
+
+    function pendingArken(uint256 _pid, address _user)
+        public
+        view
+        returns (uint256 pending)
+    {
+        uint256 pendingFromLastUpdate = _pendingFromLastUpdate(_pid, _user);
+        UserInfo memory userInfo = userInfos[_pid][_user];
+        return userInfo.rewardPending + pendingFromLastUpdate;
     }
 
     /// @notice Withdraw without caring about the rewards. EMERGENCY ONLY.

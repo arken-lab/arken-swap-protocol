@@ -26,6 +26,13 @@ interface IArkenStaker {
         uint256 _amount
     ) external;
 
+    function settleReward(
+        uint256 _pid,
+        address _user,
+        uint256 _amount,
+        bool _settleForBalance
+    ) external;
+
     function pendingArken(uint256 _pid, address _user)
         external
         view
