@@ -100,7 +100,18 @@ contract ArkenStaker is ArkenSmithyPool {
         ArkenSmithy _ARKEN_SMITHY,
         ArkenToken _ARKEN,
         uint256 _SMITHY_PID
-    ) ArkenSmithyPool(_ARKEN_SMITHY, _ARKEN, _SMITHY_PID) {}
+    ) ArkenSmithyPool(_ARKEN_SMITHY, _ARKEN, _SMITHY_PID) {
+        lpTokens.push(IERC20(address(0)));
+        poolIds[address(0)] = poolInfos.length;
+        poolInfos.push(
+            PoolInfo({
+                allocPoint: 0,
+                lastRewardBlock: 0,
+                accPerShare: 0,
+                totalShare: 0
+            })
+        );
+    }
 
     function add(
         uint256 _allocPoint,
@@ -115,6 +126,10 @@ contract ArkenStaker is ArkenSmithyPool {
         if (_withUpdate) {
             massUpdatePools();
         }
+        require(
+            poolIds[address(_lpToken)] == 0,
+            'ArkenStaker: LP_TOKEN_EXISTS'
+        );
         totalAllocPoint = totalAllocPoint + _allocPoint;
         lpTokens.push(_lpToken);
         poolIds[address(_lpToken)] = poolInfos.length;
