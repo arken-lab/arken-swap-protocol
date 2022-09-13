@@ -50,6 +50,11 @@ contract ArkenSmithy is Ownable, ReentrancyGuard {
         address indexed oldAdmin,
         address indexed newAdmin
     );
+    event ArkenPerBlockChange(
+        address indexed handler,
+        uint256 oldPerBlock,
+        uint256 newPerBlock
+    );
 
     /// @param _ARKEN The ARKEN token contract address.
     constructor(ArkenToken _ARKEN) {
@@ -298,14 +303,11 @@ contract ArkenSmithy is Ownable, ReentrancyGuard {
         uint256 newPerBlock
     ) internal {
         if (handler != address(0) && Address.isContract(handler)) {
-            (bool _optionalSuccess, ) = handler.call(
-                abi.encodeWithSignature(
-                    'handleArkenPerBlockChange(uint256,uint256)',
-                    oldPerBlock,
-                    newPerBlock
-                )
+            IArkenSmithyPool(handler).handleArkenPerBlockChange(
+                oldPerBlock,
+                newPerBlock
             );
-            assert(_optionalSuccess);
         }
+        emit ArkenPerBlockChange(handler, oldPerBlock, newPerBlock);
     }
 }
