@@ -7,8 +7,7 @@ import '@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol';
 import '@openzeppelin/contracts/security/ReentrancyGuard.sol';
 
 import '../interfaces/IArkenSmithyPool.sol';
-import './ArkenSmithy.sol';
-import './ArkenToken.sol';
+import '../interfaces/IArkenSmithy.sol';
 
 /// @notice This is an extensible contract for every Arken product which needs to withdraw ARKEN from SMITHY.
 abstract contract ArkenSmithyPool is
@@ -23,20 +22,20 @@ abstract contract ArkenSmithyPool is
     using SafeERC20 for IERC20;
 
     /// @notice Arken minter contract
-    ArkenSmithy public immutable ARKEN_SMITHY;
+    IArkenSmithy public immutable ARKEN_SMITHY;
 
     /// @notice The pool id on ArkenSmithy
     uint256 public immutable SMITHY_PID;
 
     /// @notice The ARKEN Token!
-    ArkenToken public immutable ARKEN;
+    IERC20 public immutable ARKEN;
 
     event InitPoolId(uint256 smithyPid);
     event EmergencyAdminWithdraw(address indexed to, uint256 amount);
 
     constructor(
-        ArkenSmithy _ARKEN_SMITHY,
-        ArkenToken _ARKEN,
+        IArkenSmithy _ARKEN_SMITHY,
+        IERC20 _ARKEN,
         uint256 _SMITHY_PID
     ) {
         ARKEN_SMITHY = _ARKEN_SMITHY;
@@ -47,6 +46,14 @@ abstract contract ArkenSmithyPool is
     /// @notice Calculate ARKEN per block for this contract's pool on SMITHY.
     function arkenPerBlock() public view returns (uint256 amount) {
         amount = ARKEN_SMITHY.arkenPerBlock(SMITHY_PID);
+    }
+
+    function getReward(uint256 fromBlock, uint256 toBlock)
+        public
+        view
+        returns (uint256 amount)
+    {
+        amount = ARKEN_SMITHY.getReward(SMITHY_PID, fromBlock, toBlock);
     }
 
     /// @notice Calculate pending ARKEN for this contract's pool on SMITHY.
@@ -70,9 +77,4 @@ abstract contract ArkenSmithyPool is
     function _withdrawFromSmithy(address _to, uint256 _amount) internal {
         ARKEN_SMITHY.withdraw(_to, SMITHY_PID, _amount);
     }
-
-    function handleArkenPerBlockChange(
-        uint256 prevArkenPerBlock,
-        uint256 newArkenPerBlock
-    ) external virtual {}
 }

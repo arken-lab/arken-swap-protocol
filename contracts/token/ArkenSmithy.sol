@@ -7,6 +7,8 @@ import '@openzeppelin/contracts/utils/Address.sol';
 import '@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol';
 import '@openzeppelin/contracts/security/ReentrancyGuard.sol';
 
+// import 'hardhat/console.sol';
+
 import './ArkenToken.sol';
 import '../interfaces/IArkenSmithyPool.sol';
 
@@ -40,6 +42,12 @@ contract ArkenSmithy is Ownable, ReentrancyGuard {
     /// @notice Total sum of ARKEN per block for every pools
     uint256 public totalArkenPerBlock;
 
+    struct PoolHistory {
+        uint256 blockNumber;
+        uint256 arkenPerBlock;
+    }
+    mapping(uint256 => PoolHistory[]) poolHistories;
+
     event Init();
     event AddPool(uint256 indexed pid, uint256 arkenPerBlock);
     event SetPool(uint256 indexed pid, uint256 arkenPerBlock);
@@ -69,6 +77,9 @@ contract ArkenSmithy is Ownable, ReentrancyGuard {
             })
         );
         poolAdmins.push(msg.sender);
+        poolHistories[0].push(
+            PoolHistory({arkenPerBlock: 0, blockNumber: block.number})
+        );
     }
 
     /// @notice Add a new pool. Can only be called by the owner.
@@ -100,7 +111,14 @@ contract ArkenSmithy is Ownable, ReentrancyGuard {
             })
         );
         poolAdmins.push(_poolAdmin);
-        emit AddPool(poolInfos.length - 1, _arkenPerBlock);
+        uint256 id = poolInfos.length - 1;
+        poolHistories[id].push(
+            PoolHistory({
+                arkenPerBlock: _arkenPerBlock,
+                blockNumber: startBlock
+            })
+        );
+        emit AddPool(id, _arkenPerBlock);
     }
 
     /// @notice Update the given pool's ARKEN per block.
@@ -117,16 +135,17 @@ contract ArkenSmithy is Ownable, ReentrancyGuard {
         if (_withUpdate) {
             massUpdatePools();
         }
-        _handleArkenPerBlockChange(
-            poolAdmins[_pid],
-            poolInfos[_pid].arkenPerBlock,
-            _arkenPerBlock
-        );
         totalArkenPerBlock =
             totalArkenPerBlock -
             poolInfos[_pid].arkenPerBlock +
             _arkenPerBlock;
         poolInfos[_pid].arkenPerBlock = _arkenPerBlock;
+        poolHistories[_pid].push(
+            PoolHistory({
+                arkenPerBlock: _arkenPerBlock,
+                blockNumber: block.number
+            })
+        );
         emit SetPool(_pid, _arkenPerBlock);
     }
 
@@ -138,19 +157,8 @@ contract ArkenSmithy is Ownable, ReentrancyGuard {
             msg.sender == poolAdmins[_pid] || msg.sender == owner(),
             'ArkenSmithy: NON_AUTHORIZED_POOL_OWNER'
         );
-        _handleArkenPerBlockChange(
-            poolAdmins[_pid],
-            poolInfos[_pid].arkenPerBlock,
-            0
-        );
-        address _oldAdmin = poolAdmins[_pid];
+        emit UpdatePoolAdmin(_pid, poolAdmins[_pid], _newAdmin);
         poolAdmins[_pid] = _newAdmin;
-        _handleArkenPerBlockChange(
-            poolAdmins[_pid],
-            0,
-            poolInfos[_pid].arkenPerBlock
-        );
-        emit UpdatePoolAdmin(_pid, _oldAdmin, _newAdmin);
     }
 
     /// @notice Update multiple ARKEN allocation pools.
@@ -173,10 +181,11 @@ contract ArkenSmithy is Ownable, ReentrancyGuard {
         for (uint256 i = 0; i < _pids.length; i++) {
             uint256 _pid = _pids[i];
             uint256 _arkenPerBlock = _arkenPerBlocks[i];
-            _handleArkenPerBlockChange(
-                poolAdmins[_pid],
-                poolInfos[_pid].arkenPerBlock,
-                _arkenPerBlock
+            poolHistories[_pid].push(
+                PoolHistory({
+                    arkenPerBlock: _arkenPerBlock,
+                    blockNumber: block.number
+                })
             );
             newTotalArkenPerBlock =
                 newTotalArkenPerBlock -
@@ -253,6 +262,82 @@ contract ArkenSmithy is Ownable, ReentrancyGuard {
         }
     }
 
+    function getReward(
+        uint256 pid,
+        uint256 fromBlock,
+        uint256 toBlock
+    ) external view returns (uint256 amount) {
+        PoolInfo memory pool = poolInfos[pid];
+        PoolHistory[] memory histories = poolHistories[pid];
+        require(histories.length > 0, 'ArkenSmithy: NO_HISTORY');
+        uint256 currentBlock = fromBlock;
+        if (currentBlock < histories[0].blockNumber) {
+            currentBlock = histories[0].blockNumber;
+        }
+        for (uint256 i = 1; i < histories.length; ++i) {
+            // console.log('[ArkenSmithy][getReward] currentBlock', currentBlock);
+            // console.log('[ArkenSmithy][getReward] amount', amount);
+            if (toBlock < currentBlock) {
+                break;
+            }
+            if (currentBlock <= histories[i].blockNumber) {
+                uint256 endBlock = histories[i].blockNumber;
+                if (pool.endRewardBlock < endBlock) {
+                    endBlock = pool.endRewardBlock;
+                } else if (toBlock < endBlock) {
+                    endBlock = toBlock;
+                }
+                // console.log('[ArkenSmithy][getReward] endBlock', endBlock);
+                uint256 blockCount = endBlock - currentBlock;
+                amount += histories[i - 1].arkenPerBlock * blockCount;
+            }
+            if (currentBlock < histories[i].blockNumber) {
+                currentBlock = histories[i].blockNumber;
+            }
+        }
+        // console.log('[ArkenSmithy][getReward] currentBlock', currentBlock);
+        // console.log('[ArkenSmithy][getReward] amount', amount);
+        if (currentBlock < toBlock) {
+            uint256 endBlock = toBlock;
+            if (pool.endRewardBlock < endBlock) {
+                endBlock = pool.endRewardBlock;
+            }
+            uint256 blockCount = endBlock - currentBlock;
+            amount +=
+                histories[histories.length - 1].arkenPerBlock *
+                blockCount;
+        }
+    }
+
+    function getRewardPerBlock(uint256 pid, uint256 blockNumber)
+        external
+        view
+        returns (uint256 amount)
+    {
+        PoolInfo memory pool = poolInfos[pid];
+        PoolHistory[] memory histories = poolHistories[pid];
+        require(histories.length > 0, 'ArkenSmithy: NO_HISTORY');
+        if (pool.endRewardBlock < blockNumber) {
+            amount = 0;
+            return amount;
+        } else if (blockNumber < histories[0].blockNumber) {
+            amount = 0;
+            return amount;
+        } else if (histories[histories.length - 1].blockNumber <= blockNumber) {
+            amount = histories[histories.length - 1].arkenPerBlock;
+            return amount;
+        }
+        for (uint256 i = 0; i < histories.length - 1; ++i) {
+            if (
+                histories[i].blockNumber <= blockNumber &&
+                blockNumber < histories[i + 1].blockNumber
+            ) {
+                amount = histories[i].arkenPerBlock;
+                break;
+            }
+        }
+    }
+
     /// @notice Withdraw all pending ARKEN.
     /// @param _pid The id of the pool.
     function withdraw(
@@ -295,19 +380,5 @@ contract ArkenSmithy is Ownable, ReentrancyGuard {
         if (_amount > 0) {
             ARKEN.transfer(_to, _amount);
         }
-    }
-
-    function _handleArkenPerBlockChange(
-        address handler,
-        uint256 oldPerBlock,
-        uint256 newPerBlock
-    ) internal {
-        if (handler != address(0) && Address.isContract(handler)) {
-            IArkenSmithyPool(handler).handleArkenPerBlockChange(
-                oldPerBlock,
-                newPerBlock
-            );
-        }
-        emit ArkenPerBlockChange(handler, oldPerBlock, newPerBlock);
     }
 }

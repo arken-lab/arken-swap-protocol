@@ -9,7 +9,6 @@ import '@openzeppelin/contracts/security/ReentrancyGuard.sol';
 // import 'hardhat/console.sol';
 
 import './ArkenSmithyPool.sol';
-import './ArkenToken.sol';
 
 /// @notice This contract holds Arken's LPs staking functionality.
 ///     The ARKEN reward that this contract will be distributed to stakers will be withdraw from SMITHY.
@@ -97,8 +96,8 @@ contract ArkenStaker is ArkenSmithyPool {
     );
 
     constructor(
-        ArkenSmithy _ARKEN_SMITHY,
-        ArkenToken _ARKEN,
+        IArkenSmithy _ARKEN_SMITHY,
+        IERC20 _ARKEN,
         uint256 _SMITHY_PID
     ) ArkenSmithyPool(_ARKEN_SMITHY, _ARKEN, _SMITHY_PID) {
         lpTokens.push(IERC20(address(0)));
@@ -185,10 +184,6 @@ contract ArkenStaker is ArkenSmithyPool {
         }
     }
 
-    function handleArkenPerBlockChange(uint256, uint256) external override {
-        massUpdatePools();
-    }
-
     /// @notice Update reward variables for the given pool.
     /// @param _pid The id of the pool. See `poolInfos`.
     /// @return pool Returns the pool that was updated.
@@ -197,10 +192,12 @@ contract ArkenStaker is ArkenSmithyPool {
         if (block.number > pool.lastRewardBlock) {
             uint256 lpSupply = pool.totalShare;
             if (lpSupply > 0 && totalAllocPoint > 0) {
-                uint256 multiplier = block.number - pool.lastRewardBlock;
-                uint256 arkenReward = ((multiplier *
-                    arkenPerBlock() *
-                    pool.allocPoint) * ACC_ARKEN_PRECISION) / totalAllocPoint;
+                uint256 rewardInPeriod = getReward(
+                    pool.lastRewardBlock,
+                    block.number
+                );
+                uint256 arkenReward = ((rewardInPeriod * pool.allocPoint) *
+                    ACC_ARKEN_PRECISION) / totalAllocPoint;
                 pool.accPerShare = pool.accPerShare + (arkenReward / lpSupply);
             }
             pool.lastRewardBlock = block.number;
@@ -385,10 +382,12 @@ contract ArkenStaker is ArkenSmithyPool {
         if (block.number > pool.lastRewardBlock) {
             uint256 lpSupply = pool.totalShare;
             if (lpSupply > 0 && totalAllocPoint > 0) {
-                uint256 multiplier = block.number - pool.lastRewardBlock;
-                uint256 arkenReward = ((multiplier *
-                    arkenPerBlock() *
-                    pool.allocPoint) * ACC_ARKEN_PRECISION) / totalAllocPoint;
+                uint256 rewardInPeriod = getReward(
+                    pool.lastRewardBlock,
+                    block.number
+                );
+                uint256 arkenReward = ((rewardInPeriod * pool.allocPoint) *
+                    ACC_ARKEN_PRECISION) / totalAllocPoint;
                 pool.accPerShare = pool.accPerShare + (arkenReward / lpSupply);
             }
         }
