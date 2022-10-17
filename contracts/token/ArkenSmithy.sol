@@ -284,7 +284,8 @@ contract ArkenSmithy is Ownable, ReentrancyGuard {
                 uint256 endBlock = histories[i].blockNumber;
                 if (pool.endRewardBlock < endBlock) {
                     endBlock = pool.endRewardBlock;
-                } else if (toBlock < endBlock) {
+                }
+                if (toBlock < endBlock) {
                     endBlock = toBlock;
                 }
                 // console.log('[ArkenSmithy][getReward] endBlock', endBlock);
