@@ -20,6 +20,7 @@ import './interfaces/IBalancer.sol';
 import './interfaces/ICurveTricryptoV2.sol';
 import './interfaces/IArkenApprove.sol';
 import './interfaces/IDMMPool.sol';
+import './interfaces/IWooPP.sol';
 import './lib/UniswapV2Library.sol';
 import './lib/DMMLibrary.sol';
 import './lib/UniswapV3CallbackValidation.sol';
@@ -45,6 +46,7 @@ contract ArkenDexV3 is Ownable {
     address public _WETH_DFYN_;
     address public _ARKEN_APPROVE_;
     address public _UNISWAP_V3_FACTORY_;
+    address public _WOOFI_QUOTE_TOKEN_;
 
     /*
     ==============================================================================
@@ -72,6 +74,7 @@ contract ArkenDexV3 is Ownable {
     event DODOApproveUpdated(address newDODOApproveAddress);
     event ArkenApproveUpdated(address newArkenApproveAddress);
     event UniswapV3FactoryUpdated(address newUv3Factory);
+    event WooFiQuoteTokenUpdated(address newWooFiQuoteTokenAddress);
 
     /*
     ==============================================================================
@@ -88,7 +91,8 @@ contract ArkenDexV3 is Ownable {
         address _wrappedEtherDfyn,
         address _dodoApproveAddress,
         address _arkenApprove,
-        address _uniswapV3Factory
+        address _uniswapV3Factory,
+        address _woofiQuoteToken
     ) {
         transferOwnership(_ownerAddress);
         _FEE_WALLET_ADDR_ = _feeWalletAddress;
@@ -97,6 +101,7 @@ contract ArkenDexV3 is Ownable {
         _WETH_DFYN_ = _wrappedEtherDfyn;
         _ARKEN_APPROVE_ = _arkenApprove;
         _UNISWAP_V3_FACTORY_ = _uniswapV3Factory;
+        _WOOFI_QUOTE_TOKEN_ = _woofiQuoteToken;
     }
 
     receive() external payable {}
@@ -142,6 +147,18 @@ contract ArkenDexV3 is Ownable {
         emit UniswapV3FactoryUpdated(_UNISWAP_V3_FACTORY_);
     }
 
+    function updateWoofiQuoteToken(address _woofiQuoteToken)
+        external
+        onlyOwner
+    {
+        require(
+            _woofiQuoteToken != address(0),
+            'WooFi quote token zero address'
+        );
+        _WOOFI_QUOTE_TOKEN_ = _woofiQuoteToken;
+        emit WooFiQuoteTokenUpdated(_WOOFI_QUOTE_TOKEN_);
+    }
+
     /*
     ==================================================================================
 
@@ -164,7 +181,8 @@ contract ArkenDexV3 is Ownable {
         UNISWAP_V3,
         CURVE_TRICRYPTO_V2,
         LIMIT_ORDER_PROTOCOL_V2,
-        KYBER_DMM
+        KYBER_DMM,
+        WOO_FI
     }
     struct TradeRoute {
         address routerAddress;
@@ -459,8 +477,69 @@ contract ArkenDexV3 is Ownable {
             _tradeCurveTricryptoV2(route, amountIn);
         } else if (route.dexInterface == RouterInterface.KYBER_DMM) {
             _tradeKyberDMM(route, amountIn, desc, data);
+        } else if (route.dexInterface == RouterInterface.WOO_FI) {
+            _tradeWooFi(route, amountIn, desc);
         } else {
             revert('unknown router interface');
+        }
+    }
+
+    function _tradeWooFi(
+        TradeRoute memory route,
+        uint256 amountIn,
+        TradeDescription memory desc
+    ) internal {
+        require(route.from == address(0), 'route.from should be zero address');
+
+        IWooPP wooPool = IWooPP(route.lpAddress);
+
+        _increaseAllowance(route.fromToken, route.lpAddress, amountIn);
+
+        address to = route.to;
+        if (to == address(0)) to = address(this);
+        if (to == address(1)) to = desc.to;
+
+        if (route.fromToken == _WOOFI_QUOTE_TOKEN_) {
+            // case 1: quoteToken --> baseToken
+            wooPool.sellQuote(
+                route.toToken,
+                amountIn,
+                0,
+                to,
+                address(0)
+            );
+        } else if (route.toToken == _WOOFI_QUOTE_TOKEN_) {
+            // case 2: fromToken --> quoteToken
+            wooPool.sellBase(
+                route.fromToken,
+                amountIn,
+                0,
+                to,
+                address(0)
+            );
+        } else {
+            // case 3: fromToken --> quoteToken --> toToken
+            uint256 quoteAmount = wooPool.sellBase(
+                route.fromToken,
+                amountIn,
+                0,
+                address(this),
+                address(0)
+            );
+
+            _increaseAllowance(
+                _WOOFI_QUOTE_TOKEN_,
+                route.lpAddress,
+                quoteAmount
+            );
+
+            wooPool.sellQuote(
+                route.toToken,
+                quoteAmount,
+                0,
+                to,
+                address(0)
+            );
         }
     }
 

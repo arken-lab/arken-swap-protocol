@@ -9,6 +9,7 @@ import '@openzeppelin/contracts-upgradeable/proxy/utils/UUPSUpgradeable.sol';
 import '@openzeppelin/contracts-upgradeable/access/OwnableUpgradeable.sol';
 
 import './ArkenDexTrader.sol';
+import '../interfaces/IArkenDexAmbassador.sol';
 
 contract ArkenDexV4 is Initializable, UUPSUpgradeable, OwnableUpgradeable {
     using SafeERC20 for IERC20;
@@ -20,6 +21,7 @@ contract ArkenDexV4 is Initializable, UUPSUpgradeable, OwnableUpgradeable {
     address public _WETH_DFYN_;
     address public _UNISWAP_V3_FACTORY_;
     address public _WOOFI_QUOTE_TOKEN_;
+    address public _ARKEN_DEX_AMBASSADOR_;
     // for proxy reasons, add new variables only after this line
 
     /*
@@ -77,7 +79,8 @@ contract ArkenDexV4 is Initializable, UUPSUpgradeable, OwnableUpgradeable {
         address _wethDfyn,
         address _dodoApproveAddress,
         address _uniswapV3Factory,
-        address _woofiQuoteToken
+        address _woofiQuoteToken,
+        address _dexAmbassador
     ) public initializer {
         __Ownable_init();
         transferOwnership(_ownerAddress);
@@ -88,6 +91,7 @@ contract ArkenDexV4 is Initializable, UUPSUpgradeable, OwnableUpgradeable {
         _DODO_APPROVE_ADDR_ = _dodoApproveAddress;
         _UNISWAP_V3_FACTORY_ = _uniswapV3Factory;
         _WOOFI_QUOTE_TOKEN_ = _woofiQuoteToken;
+        _ARKEN_DEX_AMBASSADOR_ = _dexAmbassador;
     }
 
     fallback() external payable {}
@@ -102,7 +106,8 @@ contract ArkenDexV4 is Initializable, UUPSUpgradeable, OwnableUpgradeable {
         address _wethDfyn,
         address _dodoApproveAddress,
         address _uniswapV3Factory,
-        address _woofiQuoteToken
+        address _woofiQuoteToken,
+        address _dexAmbassador
     ) public onlyOwner {
         _FEE_WALLET_ADDR_ = _feeWalletAddress;
         _WETH_ = _weth;
@@ -110,6 +115,7 @@ contract ArkenDexV4 is Initializable, UUPSUpgradeable, OwnableUpgradeable {
         _DODO_APPROVE_ADDR_ = _dodoApproveAddress;
         _UNISWAP_V3_FACTORY_ = _uniswapV3Factory;
         _WOOFI_QUOTE_TOKEN_ = _woofiQuoteToken;
+        _ARKEN_DEX_AMBASSADOR_ = _dexAmbassador;
     }
 
     /*
@@ -189,6 +195,101 @@ contract ArkenDexV4 is Initializable, UUPSUpgradeable, OwnableUpgradeable {
             desc.dstToken,
             desc.to
         ) - beforeDstAmt;
+        require(
+            receivedAmt >= desc.amountOutMin,
+            'Received token is not enough'
+        );
+
+        emit Swapped(desc.srcToken, desc.dstToken, desc.amountIn, receivedAmt);
+    }
+
+    function tradeOutside(
+        ArkenDexTrader.TradeDescriptionOutside calldata desc,
+        bytes calldata interactionDataOutside,
+        uint256 valueOutside,
+        address targetOutside
+    ) external payable {
+        require(desc.amountIn > 0, 'Amount-in needs to be more than zero');
+        require(
+            desc.amountOutMin > 0,
+            'Amount-out minimum needs to be more than zero'
+        );
+        if (ArkenDexTrader._ETH_ == desc.srcToken) {
+            require(
+                desc.amountIn == msg.value,
+                'Ether value not match amount-in'
+            );
+        }
+        ArkenDexTrader.TradeData memory data = ArkenDexTrader.TradeData({
+            amountIn: desc.amountIn,
+            weth: _WETH_
+        });
+        if (desc.isSourceFee) {
+            if (ArkenDexTrader._ETH_ == desc.srcToken) {
+                data.amountIn = _collectFee(desc.amountIn, desc.srcToken);
+            } else {
+                uint256 fee = _calculateFee(desc.amountIn);
+                require(fee < desc.amountIn, 'Fee exceeds amount');
+                data.amountIn = ArkenDexTrader._transferFromSender(
+                    desc.srcToken,
+                    _FEE_WALLET_ADDR_,
+                    fee,
+                    desc.srcToken,
+                    data
+                );
+            }
+        }
+
+        uint256 beforeDstAmtTo = ArkenDexTrader._getBalance(
+            desc.dstToken,
+            desc.to
+        );
+
+        if (ArkenDexTrader._ETH_ != desc.srcToken) {
+            SafeERC20.safeTransferFrom(
+                IERC20(desc.srcToken),
+                msg.sender,
+                _ARKEN_DEX_AMBASSADOR_,
+                data.amountIn
+            );
+        }
+        IArkenDexAmbassador(_ARKEN_DEX_AMBASSADOR_).tradeWithTarget{
+            value: valueOutside
+        }(
+            desc.srcToken,
+            desc.dstToken,
+            data.amountIn,
+            interactionDataOutside,
+            targetOutside
+        );
+        uint256 returnAmount = ArkenDexTrader._getBalance(
+            desc.dstToken,
+            address(this)
+        );
+        require(
+            returnAmount > 0,
+            'returnAmount from target needs to be more than zero'
+        );
+
+        if (!desc.isSourceFee) {
+            require(
+                returnAmount >= desc.amountOutMin,
+                'Return amount is not enough'
+            );
+            returnAmount = _collectFee(returnAmount, desc.dstToken);
+        }
+
+        if (ArkenDexTrader._ETH_ == desc.dstToken) {
+            (bool sent, ) = desc.to.call{value: returnAmount}('');
+            require(sent, 'Failed to send Ether');
+        } else {
+            IERC20(desc.dstToken).safeTransfer(desc.to, returnAmount);
+        }
+
+        uint256 receivedAmt = ArkenDexTrader._getBalance(
+            desc.dstToken,
+            desc.to
+        ) - beforeDstAmtTo;
         require(
             receivedAmt >= desc.amountOutMin,
             'Received token is not enough'
