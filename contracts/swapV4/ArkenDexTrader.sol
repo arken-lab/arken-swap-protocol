@@ -27,7 +27,7 @@ library ArkenDexTrader {
     using SafeERC20 for IERC20;
 
     // CONSTANTS
-    uint256 constant _MAX_UINT_256_ = 2**256 - 1;
+    uint256 constant _MAX_UINT_256_ = 2 ** 256 - 1;
     // Uniswap V3
     uint160 public constant MIN_SQRT_RATIO = 4295128739 + 1;
     uint160 public constant MAX_SQRT_RATIO =
@@ -99,7 +99,7 @@ library ArkenDexTrader {
         address wethDfyn,
         address dodoApproveAddress,
         address woofiQuoteToken
-    ) public {
+    ) public returns (TradeData memory) {
         require(
             route.part <= 100000000,
             'Route percentage can not exceed 100000000'
@@ -163,6 +163,7 @@ library ArkenDexTrader {
         } else {
             revert('unknown router interface');
         }
+        return data;
     }
 
     function _tradeWooFi(
@@ -435,9 +436,10 @@ library ArkenDexTrader {
         );
     }
 
-    function _tradeCurveTricryptoV2(TradeRoute calldata route, uint256 amountIn)
-        public
-    {
+    function _tradeCurveTricryptoV2(
+        TradeRoute calldata route,
+        uint256 amountIn
+    ) public {
         require(route.from == address(0), 'route.from should be zero address');
         _increaseAllowance(route.fromToken, route.routerAddress, amountIn);
         ICurveTricryptoV2(route.routerAddress).exchange(
@@ -460,9 +462,10 @@ library ArkenDexTrader {
         );
     }
 
-    function _tradeVyperUnderlying(TradeRoute calldata route, uint256 amountIn)
-        public
-    {
+    function _tradeVyperUnderlying(
+        TradeRoute calldata route,
+        uint256 amountIn
+    ) public {
         require(route.from == address(0), 'route.from should be zero address');
         _increaseAllowance(route.fromToken, route.routerAddress, amountIn);
         IVyperUnderlyingSwap(route.routerAddress).exchange_underlying(
@@ -482,9 +485,10 @@ library ArkenDexTrader {
         dex.swap(tokenIndexFrom, tokenIndexTo, amountIn, 0, _MAX_UINT_256_);
     }
 
-    function _tradeBalancer(TradeRoute calldata route, uint256 amountIn)
-        public
-    {
+    function _tradeBalancer(
+        TradeRoute calldata route,
+        uint256 amountIn
+    ) public {
         require(route.from == address(0), 'route.from should be zero address');
         _increaseAllowance(route.fromToken, route.routerAddress, amountIn);
         IBalancerRouter(route.routerAddress).swap(
@@ -545,11 +549,10 @@ library ArkenDexTrader {
         IWETH(weth).withdraw(amount);
     }
 
-    function _getBalance(address token, address account)
-        public
-        view
-        returns (uint256)
-    {
+    function _getBalance(
+        address token,
+        address account
+    ) public view returns (uint256) {
         if (_ETH_ == token) {
             return account.balance;
         } else {

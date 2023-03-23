@@ -127,10 +127,9 @@ contract ArkenDexV4 is Initializable, UUPSUpgradeable, OwnableUpgradeable {
     ==================================================================================
     */
 
-    function trade(ArkenDexTrader.TradeDescription calldata desc)
-        external
-        payable
-    {
+    function trade(
+        ArkenDexTrader.TradeDescription calldata desc
+    ) external payable {
         require(desc.amountIn > 0, 'Amount-in needs to be more than zero');
         require(
             desc.amountOutMin > 0,
@@ -147,6 +146,10 @@ contract ArkenDexV4 is Initializable, UUPSUpgradeable, OwnableUpgradeable {
             );
         }
 
+        uint256 beforeSrcAmt = ArkenDexTrader._getBalance(
+            desc.srcToken,
+            msg.sender
+        );
         uint256 beforeDstAmt = ArkenDexTrader._getBalance(
             desc.dstToken,
             desc.to
@@ -158,16 +161,18 @@ contract ArkenDexV4 is Initializable, UUPSUpgradeable, OwnableUpgradeable {
         });
         if (desc.isSourceFee) {
             if (ArkenDexTrader._ETH_ == desc.srcToken) {
-                data.amountIn = _collectFee(desc.amountIn, desc.srcToken);
+                data.amountIn = _collectFee(
+                    data,
+                    false,
+                    desc.amountIn,
+                    desc.srcToken
+                );
             } else {
-                uint256 fee = _calculateFee(desc.amountIn);
-                require(fee < desc.amountIn, 'Fee exceeds amount');
-                data.amountIn = ArkenDexTrader._transferFromSender(
-                    desc.srcToken,
-                    _FEE_WALLET_ADDR_,
-                    fee,
-                    desc.srcToken,
-                    data
+                data.amountIn = _collectFee(
+                    data,
+                    true,
+                    desc.amountIn,
+                    desc.srcToken
                 );
             }
         }
@@ -179,7 +184,12 @@ contract ArkenDexV4 is Initializable, UUPSUpgradeable, OwnableUpgradeable {
                 returnAmount >= desc.amountOutMin && returnAmount > 0,
                 'Return amount is not enough'
             );
-            returnAmount = _collectFee(returnAmount, desc.dstToken);
+            returnAmount = _collectFee(
+                data,
+                false,
+                returnAmount,
+                desc.dstToken
+            );
         }
 
         if (returnAmount > 0) {
@@ -199,6 +209,17 @@ contract ArkenDexV4 is Initializable, UUPSUpgradeable, OwnableUpgradeable {
             receivedAmt >= desc.amountOutMin,
             'Received token is not enough'
         );
+
+        if (desc.srcToken != ArkenDexTrader._ETH_) {
+            uint256 afterSrcAmt = ArkenDexTrader._getBalance(
+                desc.srcToken,
+                msg.sender
+            );
+            require(
+                beforeSrcAmt - afterSrcAmt <= desc.amountIn,
+                'Paid token exceeds amount-in'
+            );
+        }
 
         emit Swapped(desc.srcToken, desc.dstToken, desc.amountIn, receivedAmt);
     }
@@ -226,20 +247,26 @@ contract ArkenDexV4 is Initializable, UUPSUpgradeable, OwnableUpgradeable {
         });
         if (desc.isSourceFee) {
             if (ArkenDexTrader._ETH_ == desc.srcToken) {
-                data.amountIn = _collectFee(desc.amountIn, desc.srcToken);
+                data.amountIn = _collectFee(
+                    data,
+                    false,
+                    desc.amountIn,
+                    desc.srcToken
+                );
             } else {
-                uint256 fee = _calculateFee(desc.amountIn);
-                require(fee < desc.amountIn, 'Fee exceeds amount');
-                data.amountIn = ArkenDexTrader._transferFromSender(
-                    desc.srcToken,
-                    _FEE_WALLET_ADDR_,
-                    fee,
-                    desc.srcToken,
-                    data
+                data.amountIn = _collectFee(
+                    data,
+                    true,
+                    desc.amountIn,
+                    desc.srcToken
                 );
             }
         }
 
+        uint256 beforeSrcAmt = ArkenDexTrader._getBalance(
+            desc.srcToken,
+            msg.sender
+        );
         uint256 beforeDstAmtTo = ArkenDexTrader._getBalance(
             desc.dstToken,
             desc.to
@@ -276,7 +303,12 @@ contract ArkenDexV4 is Initializable, UUPSUpgradeable, OwnableUpgradeable {
                 returnAmount >= desc.amountOutMin,
                 'Return amount is not enough'
             );
-            returnAmount = _collectFee(returnAmount, desc.dstToken);
+            returnAmount = _collectFee(
+                data,
+                false,
+                returnAmount,
+                desc.dstToken
+            );
         }
 
         if (ArkenDexTrader._ETH_ == desc.dstToken) {
@@ -294,6 +326,17 @@ contract ArkenDexV4 is Initializable, UUPSUpgradeable, OwnableUpgradeable {
             receivedAmt >= desc.amountOutMin,
             'Received token is not enough'
         );
+
+        if (desc.srcToken != ArkenDexTrader._ETH_) {
+            uint256 afterSrcAmt = ArkenDexTrader._getBalance(
+                desc.srcToken,
+                msg.sender
+            );
+            require(
+                beforeSrcAmt - afterSrcAmt <= desc.amountIn,
+                'Paid token exceeds amount-in'
+            );
+        }
 
         emit Swapped(desc.srcToken, desc.dstToken, desc.amountIn, receivedAmt);
     }
@@ -332,7 +375,11 @@ contract ArkenDexV4 is Initializable, UUPSUpgradeable, OwnableUpgradeable {
                 data.amountIn = balanceSrcAmt;
             }
         }
-        // require(stopLimitFee >= 10, 'Fee is too low');
+
+        uint256 beforeSrcAmt = ArkenDexTrader._getBalance(
+            desc.srcToken,
+            msg.sender
+        );
         uint256 beforeDstAmt = ArkenDexTrader._getBalance(
             desc.dstToken,
             desc.to
@@ -341,26 +388,21 @@ contract ArkenDexV4 is Initializable, UUPSUpgradeable, OwnableUpgradeable {
         if (desc.isSourceFee && stopLimitFee > 0 && minimumStopLimitFee > 0) {
             if (ArkenDexTrader._ETH_ == desc.srcToken) {
                 data.amountIn = _collectStopLimitFee(
+                    data,
+                    false,
                     desc.amountIn,
                     desc.srcToken,
                     stopLimitFee,
                     minimumStopLimitFee
                 );
             } else {
-                uint256 feeAmount = _calculateStopLimitFee(
+                data.amountIn = _collectStopLimitFee(
+                    data,
+                    true,
                     desc.amountIn,
-                    stopLimitFee
-                );
-                if (feeAmount < minimumStopLimitFee) {
-                    feeAmount = minimumStopLimitFee;
-                }
-                require(feeAmount < desc.amountIn, 'Fee exceeds amount');
-                data.amountIn = ArkenDexTrader._transferFromSender(
                     desc.srcToken,
-                    _FEE_WALLET_ADDR_,
-                    feeAmount,
-                    desc.srcToken,
-                    data
+                    stopLimitFee,
+                    minimumStopLimitFee
                 );
             }
         }
@@ -372,6 +414,8 @@ contract ArkenDexV4 is Initializable, UUPSUpgradeable, OwnableUpgradeable {
                 'Return amount is not enough'
             );
             returnAmount = _collectStopLimitFee(
+                data,
+                false,
                 returnAmount,
                 desc.dstToken,
                 stopLimitFee,
@@ -396,6 +440,17 @@ contract ArkenDexV4 is Initializable, UUPSUpgradeable, OwnableUpgradeable {
             receivedAmt >= desc.amountOutMin,
             'Received token is not enough'
         );
+
+        if (desc.srcToken != ArkenDexTrader._ETH_) {
+            uint256 afterSrcAmt = ArkenDexTrader._getBalance(
+                desc.srcToken,
+                msg.sender
+            );
+            require(
+                beforeSrcAmt - afterSrcAmt <= desc.amountIn,
+                'Paid token exceeds amount-in'
+            );
+        }
 
         emit SwappedStopLimit(
             desc.srcToken,
@@ -423,7 +478,7 @@ contract ArkenDexV4 is Initializable, UUPSUpgradeable, OwnableUpgradeable {
         }
 
         for (uint256 i = 0; i < desc.routes.length; i++) {
-            ArkenDexTrader._tradeRoute(
+            data = ArkenDexTrader._tradeRoute(
                 desc.routes[i],
                 desc,
                 data,
@@ -481,18 +536,30 @@ contract ArkenDexV4 is Initializable, UUPSUpgradeable, OwnableUpgradeable {
 
     */
 
-    function _collectFee(uint256 amount, address token)
-        internal
-        returns (uint256 remainingAmount)
-    {
+    function _collectFee(
+        ArkenDexTrader.TradeData memory data,
+        bool isTransferedFromSender,
+        uint256 amount,
+        address token
+    ) internal returns (uint256 remainingAmount) {
         uint256 fee = _calculateFee(amount);
         require(fee < amount, 'Fee exceeds amount');
         remainingAmount = amount - fee;
-        if (ArkenDexTrader._ETH_ == token) {
-            (bool sent, ) = _FEE_WALLET_ADDR_.call{value: fee}('');
-            require(sent, 'Failed to send Ether too fee');
+        if (isTransferedFromSender) {
+            remainingAmount = ArkenDexTrader._transferFromSender(
+                token,
+                _FEE_WALLET_ADDR_,
+                fee,
+                token,
+                data
+            );
         } else {
-            IERC20(token).safeTransfer(_FEE_WALLET_ADDR_, fee);
+            if (ArkenDexTrader._ETH_ == token) {
+                (bool sent, ) = _FEE_WALLET_ADDR_.call{value: fee}('');
+                require(sent, 'Failed to send Ether too fee');
+            } else {
+                IERC20(token).safeTransfer(_FEE_WALLET_ADDR_, fee);
+            }
         }
         emit CollectFee(_FEE_WALLET_ADDR_, token, fee);
     }
@@ -502,6 +569,8 @@ contract ArkenDexV4 is Initializable, UUPSUpgradeable, OwnableUpgradeable {
     }
 
     function _collectStopLimitFee(
+        ArkenDexTrader.TradeData memory data,
+        bool isTransferedFromSender,
         uint256 amount,
         address token,
         uint256 stopLimitFee,
@@ -513,20 +582,29 @@ contract ArkenDexV4 is Initializable, UUPSUpgradeable, OwnableUpgradeable {
         }
         require(feeAmount < amount, 'Fee exceeds amount');
         remainingAmount = amount - feeAmount;
-        if (ArkenDexTrader._ETH_ == token) {
-            (bool sent, ) = _FEE_WALLET_ADDR_.call{value: feeAmount}('');
-            require(sent, 'Failed to send Ether too fee');
+        if (isTransferedFromSender) {
+            remainingAmount = ArkenDexTrader._transferFromSender(
+                token,
+                _FEE_WALLET_ADDR_,
+                feeAmount,
+                token,
+                data
+            );
         } else {
-            IERC20(token).safeTransfer(_FEE_WALLET_ADDR_, feeAmount);
+            if (ArkenDexTrader._ETH_ == token) {
+                (bool sent, ) = _FEE_WALLET_ADDR_.call{value: feeAmount}('');
+                require(sent, 'Failed to send Ether too fee');
+            } else {
+                IERC20(token).safeTransfer(_FEE_WALLET_ADDR_, feeAmount);
+            }
         }
         emit CollectFeeStopLimit(_FEE_WALLET_ADDR_, token, feeAmount);
     }
 
-    function _calculateStopLimitFee(uint256 amount, uint256 stopLimitFee)
-        internal
-        pure
-        returns (uint256)
-    {
+    function _calculateStopLimitFee(
+        uint256 amount,
+        uint256 stopLimitFee
+    ) internal pure returns (uint256) {
         return (amount * stopLimitFee) / 10000;
     }
 
@@ -536,11 +614,9 @@ contract ArkenDexV4 is Initializable, UUPSUpgradeable, OwnableUpgradeable {
     █▄▀ ██▄ ▀▄▀
 
     */
-    function testTransfer(ArkenDexTrader.TradeDescription calldata desc)
-        external
-        payable
-        returns (uint256 returnAmount)
-    {
+    function testTransfer(
+        ArkenDexTrader.TradeDescription calldata desc
+    ) external payable returns (uint256 returnAmount) {
         IERC20 dstToken = IERC20(desc.dstToken);
         ArkenDexTrader.TradeData memory data = ArkenDexTrader.TradeData({
             amountIn: desc.amountIn,
