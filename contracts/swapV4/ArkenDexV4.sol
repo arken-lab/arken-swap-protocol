@@ -346,6 +346,7 @@ contract ArkenDexV4 is Initializable, UUPSUpgradeable, OwnableUpgradeable {
         uint256 stopLimitFee,
         uint256 minimumStopLimitFee
     ) external payable {
+        require(stopLimitFee > 0 && minimumStopLimitFee > 0, 'stopLimitFee and minimumStopLimitFee need to be more than zero');
         require(msg.sender.isContract(), 'Only callable by contracts');
         require(desc.amountIn > 0, 'Amount-in needs to be more than zero');
         require(
@@ -385,7 +386,7 @@ contract ArkenDexV4 is Initializable, UUPSUpgradeable, OwnableUpgradeable {
             desc.to
         );
 
-        if (desc.isSourceFee && stopLimitFee > 0 && minimumStopLimitFee > 0) {
+        if (desc.isSourceFee) {
             if (ArkenDexTrader._ETH_ == desc.srcToken) {
                 data.amountIn = _collectStopLimitFee(
                     data,
@@ -408,7 +409,7 @@ contract ArkenDexV4 is Initializable, UUPSUpgradeable, OwnableUpgradeable {
         }
         uint256 returnAmount = _trade(desc, data);
 
-        if (!desc.isSourceFee && stopLimitFee > 0 && minimumStopLimitFee > 0) {
+        if (!desc.isSourceFee) {
             require(
                 returnAmount >= desc.amountOutMin && returnAmount > 0,
                 'Return amount is not enough'
